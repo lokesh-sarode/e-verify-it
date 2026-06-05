@@ -1,0 +1,169 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum VerificationCategory {
+  valid
+  invalid
+  risky
+  unknown
+}
+
+enum ResultSource {
+  single
+  bulk
+}
+
+enum BulkJobStatus {
+  pending
+  processing
+  completed
+  failed
+  cancelled
+}
+
+enum BulkJobMode {
+  reacher_bulk
+  local_worker
+}
+
+enum BulkEmailStatus {
+  pending
+  processing
+  completed
+  failed
+  skipped
+}
+
+enum UploadRejectedReason {
+  empty
+  duplicate
+  invalid_syntax
+}
+
+enum AuditAction {
+  login
+  upload
+  download
+  single_verification
+}
+
+model AdminUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model VerificationResult {
+  id              String               @id @default(cuid())
+  email           String
+  normalizedEmail String
+  category        VerificationCategory
+  isReachable     Boolean?
+  syntaxStatus    String?
+  mxStatus        String?
+  smtpStatus      String?
+  smtpResult      String?
+  catchAll        Boolean?
+  disposable      Boolean?
+  roleAccount     Boolean?
+  freeProvider    Boolean?
+  reason          String?
+  rawJson         Json
+  source          ResultSource
+  createdAt       DateTime             @default(now())
+
+  @@index([normalizedEmail])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model BulkJob {
+  id                String            @id @default(cuid())
+  filename          String
+  status            BulkJobStatus     @default(pending)
+  mode              BulkJobMode?
+  reacherJobId      String?
+  originalRows      Int               @default(0)
+  emptyRows         Int               @default(0)
+  duplicateRows     Int               @default(0)
+  syntaxInvalidRows Int               @default(0)
+  uniqueEmails      Int               @default(0)
+  processed         Int               @default(0)
+  validCount        Int               @default(0)
+  invalidCount      Int               @default(0)
+  riskyCount        Int               @default(0)
+  unknownCount      Int               @default(0)
+  errorMessage      String?
+  createdAt         DateTime          @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+
+  emails       BulkJobEmail[]
+  rejectedRows UploadRejectedRow[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model BulkJobEmail {
+  id              String          @id @default(cuid())
+  bulkJobId       String
+  email           String
+  normalizedEmail String
+  status          BulkEmailStatus @default(pending)
+  category        VerificationCategory?
+  isReachable     Boolean?
+  syntaxStatus    String?
+  mxStatus        String?
+  smtpStatus      String?
+  smtpResult      String?
+  reason          String?
+  rawJson         Json?
+  errorMessage    String?
+  checkedAt       DateTime?
+  createdAt       DateTime        @default(now())
+
+  bulkJob BulkJob @relation(fields: [bulkJobId], references: [id], onDelete: Cascade)
+
+  @@unique([bulkJobId, normalizedEmail])
+  @@index([bulkJobId])
+  @@index([normalizedEmail])
+  @@index([status])
+  @@index([category])
+  @@index([createdAt])
+}
+
+model UploadRejectedRow {
+  id        String               @id @default(cuid())
+  bulkJobId String
+  rowNumber Int
+  emailRaw  String?
+  reason    UploadRejectedReason
+  createdAt DateTime             @default(now())
+
+  bulkJob BulkJob @relation(fields: [bulkJobId], references: [id], onDelete: Cascade)
+
+  @@index([bulkJobId])
+  @@index([reason])
+}
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  adminId   String?
+  action    AuditAction
+  meta      Json?
+  createdAt DateTime    @default(now())
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
+}
+

@@ -1,0 +1,22 @@
+{
+  "name": "@e-verify-it/backend",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.8.2",
+    "bcryptjs": "^3.0.2",
+    "bullmq": "^5.53.2",
+    "csv-parse": "^5.6.0",
+    "read-excel-file": "^6.0.1",
+    "validator": "^13.15.15",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/validator": "^13.15.0"
+  }
+}

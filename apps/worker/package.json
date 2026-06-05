@@ -1,0 +1,20 @@
+{
+  "name": "@e-verify-it/worker",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@e-verify-it/backend": "1.0.0",
+    "bullmq": "^5.53.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.29"
+  }
+}
+
