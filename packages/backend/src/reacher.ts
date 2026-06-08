@@ -16,6 +16,12 @@ export class ReacherWorkerModeUnavailableError extends Error {
   }
 }
 
+export class ReacherConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+  }
+}
+
 type RequestOptions = {
   method?: "GET" | "POST";
   body?: unknown;
@@ -24,6 +30,7 @@ type RequestOptions = {
 };
 
 const temporaryStatuses = new Set([429, 502, 503, 504]);
+const placeholderReacherHosts = new Set(["verify.example.com"]);
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -110,6 +117,8 @@ export class ReacherClient {
   }
 
   private async request(path: string, options: RequestOptions): Promise<unknown> {
+    assertReacherConfigured(this.baseUrl);
+
     const retry = options.retry ?? true;
     const maxAttempts = retry ? 4 : 1;
     let attempt = 0;
@@ -118,9 +127,10 @@ export class ReacherClient {
       attempt += 1;
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), env.REACHER_TIMEOUT_MS);
+      const url = this.buildUrl(path, options.query);
 
       try {
-        const response = await fetch(this.buildUrl(path, options.query), {
+        const response = await fetch(url, {
           method: options.method ?? "GET",
           signal: controller.signal,
           headers: {
@@ -149,7 +159,7 @@ export class ReacherClient {
           continue;
         }
 
-        throw error;
+        throw reacherNetworkError(url, error);
       } finally {
         clearTimeout(timeout);
       }
@@ -169,6 +179,32 @@ export class ReacherClient {
   }
 }
 
+export function isReacherConfigured(baseUrl = env.REACHER_BASE_URL): boolean {
+  try {
+    const url = new URL(baseUrl);
+    return !placeholderReacherHosts.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function reacherBaseUrlSummary(baseUrl = env.REACHER_BASE_URL): string | null {
+  try {
+    const url = new URL(baseUrl);
+    return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return null;
+  }
+}
+
+function assertReacherConfigured(baseUrl: string) {
+  if (!isReacherConfigured(baseUrl)) {
+    throw new ReacherConfigurationError(
+      "REACHER_BASE_URL is not configured. Set it to your Reacher API v1 URL, for example https://your-reacher-host/v1."
+    );
+  }
+}
+
 function safeJson(text: string): unknown {
   try {
     return JSON.parse(text);
@@ -179,6 +215,7 @@ function safeJson(text: string): unknown {
 
 function isTemporaryNetworkError(error: unknown): boolean {
   if (error instanceof ReacherHttpError) return temporaryStatuses.has(error.status);
+  if (error instanceof ReacherConfigurationError) return false;
   if (error instanceof Error && error.name === "AbortError") return true;
   return error instanceof TypeError;
 }
@@ -186,4 +223,44 @@ function isTemporaryNetworkError(error: unknown): boolean {
 function reacherErrorMessage(status: number, body: unknown): string {
   const message = getString(body, ["message", "error", "detail", "error.message"]);
   return message ? `Reacher request failed with HTTP ${status}: ${message}` : `Reacher request failed with HTTP ${status}`;
+}
+
+function reacherNetworkError(url: string, error: unknown): Error {
+  if (error instanceof ReacherHttpError || error instanceof ReacherConfigurationError) return error;
+
+  const target = safeUrlForMessage(url);
+  if (error instanceof Error && error.name === "AbortError") {
+    return new Error(`Reacher request timed out after ${env.REACHER_TIMEOUT_MS} ms while calling ${target}`);
+  }
+
+  const detail = nestedErrorMessage(error);
+  const suffix = detail ? `: ${detail}` : "";
+  return new Error(
+    `Could not reach Reacher at ${target}${suffix}. If Reacher is running on your host machine and this app is running in Docker, set REACHER_BASE_URL to http://host.docker.internal:<port>/v1 instead of localhost.`
+  );
+}
+
+function safeUrlForMessage(url: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.username = "";
+    parsed.password = "";
+    parsed.search = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function nestedErrorMessage(error: unknown): string | null {
+  if (error instanceof Error && error.message && error.message !== "fetch failed") return error.message;
+
+  const cause = error && typeof error === "object" ? (error as { cause?: unknown }).cause : undefined;
+  if (cause instanceof Error && cause.message) return cause.message;
+  if (cause && typeof cause === "object") {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && code) return code;
+  }
+
+  return error instanceof Error && error.message ? error.message : null;
 }

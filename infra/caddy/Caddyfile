@@ -1,7 +1,6 @@
-{$APP_DOMAIN:localhost} {
+{$APP_DOMAIN::80} {
   encode gzip zstd
 
   reverse_proxy /api/* api:4000
   reverse_proxy frontend:80
 }
-

@@ -31,7 +31,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     reply.setCookie("auth_token", token, {
       httpOnly: true,
-      secure: env.NODE_ENV === "production",
+      secure: env.FRONTEND_URL.startsWith("https://"),
       sameSite: "lax",
       path: "/",
       maxAge: 8 * 60 * 60
@@ -57,4 +57,3 @@ export async function authRoutes(app: FastifyInstance) {
     admin: request.admin
   }));
 }
-

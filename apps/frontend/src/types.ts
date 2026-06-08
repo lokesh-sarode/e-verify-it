@@ -84,4 +84,5 @@ export type AppConfig = {
   maxUploadMb: number;
   uploadExtensions: string[];
   reacherBaseUrlConfigured: boolean;
+  reacherBaseUrl: string | null;
 };

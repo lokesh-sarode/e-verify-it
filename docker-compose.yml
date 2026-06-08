@@ -1,3 +1,23 @@
+name: e-verify-it
+
+x-app-env: &app-env
+  NODE_ENV: ${NODE_ENV:-production}
+  DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/email_verifier}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.com}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-ChangeThisStrongPassword}
+  JWT_SECRET: ${JWT_SECRET:-change_this_secret_at_least_24_chars}
+  COOKIE_SECRET: ${COOKIE_SECRET:-change_this_cookie_secret_24}
+  REACHER_BASE_URL: ${REACHER_BASE_URL:-https://verify.example.com/v1}
+  REACHER_API_KEY: ${REACHER_API_KEY:-}
+  REACHER_BULK_POLL_INTERVAL_MS: ${REACHER_BULK_POLL_INTERVAL_MS:-4000}
+  REACHER_BULK_RESULTS_PAGE_SIZE: ${REACHER_BULK_RESULTS_PAGE_SIZE:-500}
+  REACHER_TIMEOUT_MS: ${REACHER_TIMEOUT_MS:-60000}
+  VERIFICATION_CACHE_DAYS: ${VERIFICATION_CACHE_DAYS:-7}
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+  FRONTEND_URL: ${FRONTEND_URL:-http://localhost}
+  API_PORT: ${API_PORT:-4000}
+
 services:
   caddy:
     image: caddy:2-alpine
@@ -5,8 +25,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
-    env_file:
-      - .env
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-:80}
     volumes:
       - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -28,8 +48,8 @@ services:
       context: .
       dockerfile: Dockerfile.api
     restart: unless-stopped
-    env_file:
-      - .env
+    environment: *app-env
+    command: ["sh", "-c", "npm run prisma:migrate && node packages/backend/dist/seed.js && node apps/api/dist/index.js"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,8 +66,7 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
-    env_file:
-      - .env
+    environment: *app-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,6 +76,8 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -72,6 +93,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    ports:
+      - "6379:6379"
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data

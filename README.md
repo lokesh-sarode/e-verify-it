@@ -52,7 +52,7 @@ For Reacher hosted API, set `REACHER_API_KEY`. For self-hosted Reacher, leave it
 
 ## Docker Setup
 
-PowerShell:
+Docker Compose now has safe local defaults and does not require `.env` just to start. For real verification, create `.env` from the Docker example and set your Reacher values:
 
 ```powershell
 Copy-Item .env.docker.example .env
@@ -60,22 +60,28 @@ Copy-Item .env.docker.example .env
 
 Edit `.env`:
 
-- Change `APP_DOMAIN` and `FRONTEND_URL`
-- Change `ADMIN_EMAIL` and `ADMIN_PASSWORD`
-- Change `JWT_SECRET` and `COOKIE_SECRET`
-- Set `REACHER_BASE_URL` and `REACHER_API_KEY`
+- Keep `APP_DOMAIN=:80` and `FRONTEND_URL=http://localhost` for Docker Desktop local testing.
+- For production, change `APP_DOMAIN` and `FRONTEND_URL` to your real HTTPS domain.
+- Change `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `JWT_SECRET`, and `COOKIE_SECRET`.
+- Set `REACHER_BASE_URL` and `REACHER_API_KEY`.
 
 Start:
 
 ```bash
 docker compose up -d --build
-docker compose exec api npm run prisma:migrate
-docker compose exec api npm run prisma:seed
 docker compose logs -f api
 docker compose logs -f worker
 ```
 
-Caddy serves HTTPS for `APP_DOMAIN` and proxies `/api/*` to the API service.
+Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening.
+
+Caddy serves HTTP for `APP_DOMAIN=:80`. For a real hostname, set `APP_DOMAIN=your-domain.com` and `FRONTEND_URL=https://your-domain.com`; Caddy will handle HTTPS.
+
+If Reacher is running on your Windows host machine and the app is running in Docker, do not use `localhost` inside `REACHER_BASE_URL`. From a container, `localhost` means the container itself. Use:
+
+```env
+REACHER_BASE_URL=http://host.docker.internal:<reacher-port>/v1
+```
 
 ## Reacher API Mapping
 
@@ -184,6 +190,20 @@ Bulk job detail page:
 - Confirm Redis is running and `REDIS_URL` is correct.
 - Check `docker compose logs -f worker` or the local worker terminal.
 
+`Transaction already closed` during bulk upload
+
+- Bulk job creation no longer stores all upload rows inside one Prisma interactive transaction.
+- Pull the latest code, rebuild the API, and restart the worker/API.
+- For Docker Desktop, run `docker compose up -d --build`.
+
+Single verification returns `fetch failed`
+
+- The API now returns a clearer Reacher configuration or network message.
+- Confirm `REACHER_BASE_URL` is not the placeholder `https://verify.example.com/v1`.
+- Confirm `REACHER_BASE_URL` includes `/v1`.
+- If the app runs in Docker and Reacher runs on your host machine, use `http://host.docker.internal:<reacher-port>/v1`, not `http://localhost:<reacher-port>/v1`.
+- If Reacher is hosted elsewhere, confirm the container can reach it and that `REACHER_API_KEY` is correct.
+
 Bulk job stuck in `processing`
 
 - Confirm `REACHER_BASE_URL` includes `/v1`.
@@ -211,4 +231,3 @@ docker compose up -d --build
 docker compose logs -f api
 docker compose logs -f worker
 ```
-

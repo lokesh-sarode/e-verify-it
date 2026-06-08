@@ -17,24 +17,24 @@ function asJson(value: unknown): Prisma.InputJsonValue {
 }
 
 export async function createBulkJobFromUpload(filename: string, parsed: ParsedUpload, adminId?: string) {
-  const bulkJob = await prisma.$transaction(async (tx) => {
-    const job = await tx.bulkJob.create({
-      data: {
-        filename,
-        originalRows: parsed.originalRows,
-        emptyRows: parsed.emptyRows,
-        duplicateRows: parsed.duplicateRows,
-        syntaxInvalidRows: parsed.syntaxInvalidRows,
-        uniqueEmails: parsed.uniqueEmails.length,
-        status: parsed.uniqueEmails.length === 0 ? "completed" : "pending",
-        completedAt: parsed.uniqueEmails.length === 0 ? new Date() : null
-      }
-    });
+  const bulkJob = await prisma.bulkJob.create({
+    data: {
+      filename,
+      originalRows: parsed.originalRows,
+      emptyRows: parsed.emptyRows,
+      duplicateRows: parsed.duplicateRows,
+      syntaxInvalidRows: parsed.syntaxInvalidRows,
+      uniqueEmails: parsed.uniqueEmails.length,
+      status: parsed.uniqueEmails.length === 0 ? "completed" : "pending",
+      completedAt: parsed.uniqueEmails.length === 0 ? new Date() : null
+    }
+  });
 
+  try {
     for (const chunk of chunks(parsed.uniqueEmails, createManyBatchSize)) {
-      await tx.bulkJobEmail.createMany({
+      await prisma.bulkJobEmail.createMany({
         data: chunk.map((email) => ({
-          bulkJobId: job.id,
+          bulkJobId: bulkJob.id,
           email: email.email,
           normalizedEmail: email.normalizedEmail
         }))
@@ -42,9 +42,9 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
     }
 
     for (const chunk of chunks(parsed.rejectedRows, createManyBatchSize)) {
-      await tx.uploadRejectedRow.createMany({
+      await prisma.uploadRejectedRow.createMany({
         data: chunk.map((row) => ({
-          bulkJobId: job.id,
+          bulkJobId: bulkJob.id,
           rowNumber: row.rowNumber,
           emailRaw: row.emailRaw,
           reason: row.reason
@@ -52,21 +52,29 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
       });
     }
 
-    await tx.auditLog.create({
+    await prisma.auditLog.create({
       data: {
         adminId,
         action: "upload",
         meta: {
-          bulkJobId: job.id,
+          bulkJobId: bulkJob.id,
           filename,
           originalRows: parsed.originalRows,
           uniqueEmails: parsed.uniqueEmails.length
         }
       }
     });
-
-    return job;
-  });
+  } catch (error) {
+    await prisma.bulkJob.update({
+      where: { id: bulkJob.id },
+      data: {
+        status: "failed",
+        errorMessage: error instanceof Error ? error.message : String(error),
+        completedAt: new Date()
+      }
+    }).catch(() => undefined);
+    throw error;
+  }
 
   if (parsed.uniqueEmails.length > 0) {
     try {

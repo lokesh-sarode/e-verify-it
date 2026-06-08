@@ -1,6 +1,6 @@
 import { hash } from "bcryptjs";
-import { prisma } from "../src/prisma";
-import { env } from "../src/env";
+import { env } from "./env";
+import { prisma } from "./prisma";
 
 async function main() {
   const passwordHash = await hash(env.ADMIN_PASSWORD, 12);
@@ -25,4 +25,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-
