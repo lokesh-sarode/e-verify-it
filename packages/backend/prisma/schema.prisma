@@ -125,6 +125,10 @@ model BulkJobEmail {
   mxStatus        String?
   smtpStatus      String?
   smtpResult      String?
+  catchAll        Boolean?
+  disposable      Boolean?
+  roleAccount     Boolean?
+  freeProvider    Boolean?
   reason          String?
   rawJson         Json?
   errorMessage    String?
@@ -166,4 +170,3 @@ model AuditLog {
   @@index([action])
   @@index([createdAt])
 }
-

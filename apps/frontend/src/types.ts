@@ -49,6 +49,8 @@ export type BulkJob = {
 export type BulkProgress = {
   jobId: string;
   status: BulkStatus;
+  mode: "reacher_bulk" | "local_worker" | null;
+  reacherJobId: string | null;
   totalRows: number;
   uniqueEmails: number;
   processed: number;
@@ -61,6 +63,9 @@ export type BulkProgress = {
   progressPercentage: number;
   startedAt: string | null;
   completedAt: string | null;
+  elapsedSeconds: number;
+  estimatedRemainingSeconds: number;
+  recordsPerSecond: number;
   errorMessage: string | null;
 };
 
@@ -75,3 +80,8 @@ export type Stats = {
   latestJobs: BulkJob[];
 };
 
+export type AppConfig = {
+  maxUploadMb: number;
+  uploadExtensions: string[];
+  reacherBaseUrlConfigured: boolean;
+};

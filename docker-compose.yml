@@ -81,45 +81,8 @@ services:
       timeout: 5s
       retries: 10
 
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    profiles: ["reacher"]
-    restart: unless-stopped
-    ports:
-      - "15672:15672"
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  reacher-api:
-    image: ${REACHER_API_IMAGE:-reacherhq/backend:latest}
-    profiles: ["reacher"]
-    restart: unless-stopped
-    environment:
-      RCH_HTTP_HOST: 0.0.0.0
-      RCH_HTTP_PORT: 8080
-      RCH_WORKER_ENABLE: "true"
-      RCH_RABBITMQ_URL: ${REACHER_RABBITMQ_URL:-amqp://rabbitmq:5672}
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
-  reacher-worker:
-    image: ${REACHER_WORKER_IMAGE:-reacherhq/backend:latest}
-    profiles: ["reacher"]
-    restart: unless-stopped
-    command: ["worker"]
-    environment:
-      RCH_RABBITMQ_URL: ${REACHER_RABBITMQ_URL:-amqp://rabbitmq:5672}
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
 volumes:
   postgres_data:
   redis_data:
   caddy_data:
   caddy_config:
-

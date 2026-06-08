@@ -1,11 +1,12 @@
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { FileSpreadsheet, FileUp, UploadCloud } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiErrorMessage } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { ProgressBar } from "../components/ProgressBar";
 import { StatusBadge } from "../components/StatusBadge";
-import type { BulkJob } from "../types";
+import type { AppConfig, BulkJob, BulkProgress } from "../types";
 
 export function BulkUploadPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -13,19 +14,44 @@ export function BulkUploadPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdJob, setCreatedJob] = useState<BulkJob | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+
+  const configQuery = useQuery({
+    queryKey: ["app-config"],
+    queryFn: async () => (await api.get<AppConfig>("/config")).data
+  });
+
+  const progressQuery = useQuery({
+    queryKey: ["bulk-progress", createdJob?.id],
+    queryFn: async () => (await api.get<BulkProgress>(`/bulk-jobs/${createdJob?.id}/progress`)).data,
+    enabled: Boolean(createdJob?.id),
+    refetchInterval: (queryState) => {
+      const status = queryState.state.data?.status;
+      return status === "completed" || status === "failed" || status === "cancelled" ? false : 4000;
+    }
+  });
+
+  const maxUploadMb = configQuery.data?.maxUploadMb ?? 20;
+  const maxUploadBytes = maxUploadMb * 1024 * 1024;
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("Select a file");
       const form = new FormData();
       form.append("file", file);
+      setUploadProgress(0);
       const response = await api.post<{ job: BulkJob }>("/bulk-jobs/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" }
+        headers: { "Content-Type": "multipart/form-data" },
+        onUploadProgress(event) {
+          if (!event.total) return;
+          setUploadProgress(Math.round((event.loaded / event.total) * 100));
+        }
       });
       return response.data.job;
     },
     onSuccess(job) {
       setCreatedJob(job);
+      setUploadProgress(100);
       setError(null);
     },
     onError(err) {
@@ -35,9 +61,17 @@ export function BulkUploadPage() {
 
   function pickFile(nextFile: File | undefined) {
     if (!nextFile) return;
+    if (nextFile.size > maxUploadBytes) {
+      setFile(null);
+      setCreatedJob(null);
+      setError(`File exceeds ${maxUploadMb} MB`);
+      return;
+    }
+
     setFile(nextFile);
     setCreatedJob(null);
     setError(null);
+    setUploadProgress(0);
   }
 
   function handleDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -73,7 +107,7 @@ export function BulkUploadPage() {
         >
           <UploadCloud size={34} className="text-zinc-500" />
           <p className="mt-3 text-sm font-medium text-zinc-800">{file ? file.name : "CSV or XLSX"}</p>
-          <p className="mt-1 text-xs text-zinc-500">Max file size follows server settings</p>
+          <p className="mt-1 text-xs text-zinc-500">Max file size {maxUploadMb} MB</p>
           <input
             ref={inputRef}
             type="file"
@@ -91,6 +125,16 @@ export function BulkUploadPage() {
         >
           {mutation.isPending ? "Uploading" : "Create bulk job"}
         </button>
+
+        {(mutation.isPending || uploadProgress > 0) ? (
+          <div className="mt-4 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="font-medium text-zinc-700">Upload</span>
+              <span className="text-zinc-500">{uploadProgress}%</span>
+            </div>
+            <ProgressBar value={uploadProgress} />
+          </div>
+        ) : null}
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
@@ -120,6 +164,21 @@ export function BulkUploadPage() {
               ))}
             </dl>
 
+            {progressQuery.data ? (
+              <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                <div className="flex justify-between text-sm">
+                  <span className="font-medium text-zinc-700">Processing</span>
+                  <span className="text-zinc-500">{progressQuery.data.progressPercentage}%</span>
+                </div>
+                <ProgressBar value={progressQuery.data.progressPercentage} />
+                <div className="grid gap-2 text-xs text-zinc-500 sm:grid-cols-3">
+                  <span>Processed {progressQuery.data.processed}/{progressQuery.data.uniqueEmails}</span>
+                  <span>Elapsed {formatDuration(progressQuery.data.elapsedSeconds)}</span>
+                  <span>ETA {formatDuration(progressQuery.data.estimatedRemainingSeconds)}</span>
+                </div>
+              </div>
+            ) : null}
+
             <Link
               to={`/bulk-jobs/${createdJob.id}`}
               className="focus-ring inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
@@ -138,3 +197,9 @@ export function BulkUploadPage() {
   );
 }
 
+function formatDuration(totalSeconds: number) {
+  if (!totalSeconds) return "0s";
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}

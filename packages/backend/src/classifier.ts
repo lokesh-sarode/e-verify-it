@@ -127,7 +127,7 @@ export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResu
     firstValue(rawResult, ["smtp_result", "smtp.result", "smtp.response", "smtp.message", "reason"])
   );
 
-  const catchAll = asBoolean(firstValue(rawResult, ["is_catch_all", "catch_all", "catchAll", "mx.is_catch_all"]));
+  const catchAll = asBoolean(firstValue(rawResult, ["is_catch_all", "catch_all", "catchAll", "smtp.is_catch_all", "mx.is_catch_all"]));
   const disposable = asBoolean(firstValue(rawResult, ["is_disposable", "disposable", "misc.is_disposable"]));
   const roleAccount = asBoolean(firstValue(rawResult, ["is_role_account", "role_account", "misc.is_role_account"]));
   const freeProvider = asBoolean(firstValue(rawResult, ["is_free_email", "free_provider", "misc.is_free_email"]));
@@ -168,4 +168,3 @@ export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResu
     rawJson: rawResult
   };
 }
-

@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently \"npm run dev -w @e-verify-it/api\" \"npm run dev -w @e-verify-it/worker\" \"npm run dev -w @e-verify-it/frontend\"",
+    "dev": "npm run prisma:generate && npm run build -w @e-verify-it/backend && concurrently -k -n api,worker,frontend \"npm run dev -w @e-verify-it/api\" \"npm run dev -w @e-verify-it/worker\" \"npm run dev -w @e-verify-it/frontend\"",
     "build": "npm run build -w @e-verify-it/backend && npm run build -w @e-verify-it/api && npm run build -w @e-verify-it/worker && npm run build -w @e-verify-it/frontend",
     "prisma:generate": "prisma generate --schema packages/backend/prisma/schema.prisma",
     "prisma:migrate": "prisma migrate deploy --schema packages/backend/prisma/schema.prisma",
@@ -15,10 +15,12 @@
     "prisma:seed": "tsx packages/backend/prisma/seed.ts",
     "lint": "npm run lint -ws --if-present"
   },
+  "dependencies": {
+    "prisma": "^6.8.2",
+    "tsx": "^4.19.4"
+  },
   "devDependencies": {
     "concurrently": "^9.1.2",
-    "prisma": "^6.8.2",
-    "tsx": "^4.19.4",
     "typescript": "^5.8.3"
   },
   "engines": {

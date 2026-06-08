@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { z } from "zod";
 
 const numberFromEnv = (fallback: number) =>
@@ -6,13 +7,6 @@ const numberFromEnv = (fallback: number) =>
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : value;
   }, z.number().positive());
-
-const booleanFromEnv = (fallback: boolean) =>
-  z.preprocess((value) => {
-    if (value === undefined || value === "") return fallback;
-    if (typeof value === "boolean") return value;
-    return String(value).toLowerCase() === "true";
-  }, z.boolean());
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
@@ -24,17 +18,14 @@ const EnvSchema = z.object({
   COOKIE_SECRET: z.string().min(24).default("change_this_cookie_secret_24"),
   REACHER_BASE_URL: z.string().url().default("https://verify.example.com/v1"),
   REACHER_API_KEY: z.string().optional().default(""),
-  REACHER_WORKER_MODE_ENABLED: booleanFromEnv(true),
-  REACHER_RABBITMQ_URL: z.string().default("amqp://rabbitmq:5672"),
-  BULK_CONCURRENCY: numberFromEnv(3),
-  REACHER_REQUESTS_PER_SECOND: numberFromEnv(1),
+  REACHER_BULK_POLL_INTERVAL_MS: numberFromEnv(4000),
+  REACHER_BULK_RESULTS_PAGE_SIZE: numberFromEnv(500),
   REACHER_TIMEOUT_MS: numberFromEnv(60000),
   VERIFICATION_CACHE_DAYS: numberFromEnv(7),
-  MAX_UPLOAD_MB: numberFromEnv(25),
+  MAX_UPLOAD_MB: numberFromEnv(20),
   FRONTEND_URL: z.string().url().default("http://localhost:5173"),
   API_PORT: numberFromEnv(4000)
 });
 
 export const env = EnvSchema.parse(process.env);
 export type Env = z.infer<typeof EnvSchema>;
-

@@ -19,6 +19,7 @@ export class ReacherWorkerModeUnavailableError extends Error {
 type RequestOptions = {
   method?: "GET" | "POST";
   body?: unknown;
+  query?: Record<string, string | number | boolean | undefined>;
   retry?: boolean;
 };
 
@@ -38,6 +39,8 @@ function readPath(source: unknown, path: string): unknown {
 }
 
 function getString(source: unknown, paths: string[]): string | null {
+  if (typeof source === "string" && source.trim()) return source;
+
   for (const path of paths) {
     const value = readPath(source, path);
     if (typeof value === "string" && value.trim()) return value;
@@ -96,8 +99,14 @@ export class ReacherClient {
     return this.request(`/bulk/${encodeURIComponent(jobId)}`, { method: "GET" });
   }
 
-  async getBulkResults(jobId: string): Promise<unknown> {
-    return this.request(`/bulk/${encodeURIComponent(jobId)}/results`, { method: "GET" });
+  async getBulkResultsPage(jobId: string, options: { limit: number; offset: number }): Promise<unknown> {
+    return this.request(`/bulk/${encodeURIComponent(jobId)}/results`, {
+      method: "GET",
+      query: {
+        limit: options.limit,
+        offset: options.offset
+      }
+    });
   }
 
   private async request(path: string, options: RequestOptions): Promise<unknown> {
@@ -111,7 +120,7 @@ export class ReacherClient {
       const timeout = setTimeout(() => controller.abort(), env.REACHER_TIMEOUT_MS);
 
       try {
-        const response = await fetch(`${this.baseUrl}${path}`, {
+        const response = await fetch(this.buildUrl(path, options.query), {
           method: options.method ?? "GET",
           signal: controller.signal,
           headers: {
@@ -130,7 +139,7 @@ export class ReacherClient {
             continue;
           }
 
-          throw new ReacherHttpError(response.status, body);
+          throw new ReacherHttpError(response.status, body, reacherErrorMessage(response.status, body));
         }
 
         return body;
@@ -148,6 +157,16 @@ export class ReacherClient {
 
     throw new Error("Reacher request failed after retries");
   }
+
+  private buildUrl(path: string, query?: RequestOptions["query"]): string {
+    const url = new URL(`${this.baseUrl}${path}`);
+
+    for (const [key, value] of Object.entries(query ?? {})) {
+      if (value !== undefined) url.searchParams.set(key, String(value));
+    }
+
+    return url.toString();
+  }
 }
 
 function safeJson(text: string): unknown {
@@ -164,3 +183,7 @@ function isTemporaryNetworkError(error: unknown): boolean {
   return error instanceof TypeError;
 }
 
+function reacherErrorMessage(status: number, body: unknown): string {
+  const message = getString(body, ["message", "error", "detail", "error.message"]);
+  return message ? `Reacher request failed with HTTP ${status}: ${message}` : `Reacher request failed with HTTP ${status}`;
+}

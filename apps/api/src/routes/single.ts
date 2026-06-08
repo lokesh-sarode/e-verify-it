@@ -30,7 +30,15 @@ export async function singleRoutes(app: FastifyInstance) {
       return;
     }
 
-    const raw = await new ReacherClient().checkEmail(normalizedEmail);
+    let raw: unknown;
+    try {
+      raw = await new ReacherClient().checkEmail(normalizedEmail);
+    } catch (error) {
+      reply.code(502).send({
+        message: error instanceof Error ? error.message : "Reacher single email verification failed"
+      });
+      return;
+    }
     const classified = classifyReacherResult(raw);
 
     const result = await prisma.verificationResult.create({
@@ -77,4 +85,3 @@ async function findCachedSingleResult(normalizedEmail: string) {
     orderBy: { createdAt: "desc" }
   });
 }
-

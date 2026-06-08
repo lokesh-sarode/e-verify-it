@@ -1,5 +1,6 @@
 import { parse } from "csv-parse/sync";
-import readXlsxFile from "read-excel-file/node";
+import JSZip from "jszip";
+import XlsxPopulate from "xlsx-populate";
 import { isValidEmailSyntax, normalizeEmail } from "./email";
 
 export type UploadRejected = {
@@ -60,12 +61,43 @@ function parseCsv(buffer: Buffer): Array<Record<string, unknown>> {
 }
 
 async function parseWorkbook(buffer: Buffer): Promise<Array<Record<string, unknown>>> {
-  const rows = await readXlsxFile(buffer);
+  const workbook = await XlsxPopulate.fromDataAsync(await sanitizeWorkbookBuffer(buffer));
+  const sheet = workbook.sheet(0);
+  const usedRange = sheet?.usedRange();
+  const values = usedRange?.value() ?? [];
+  const rows = Array.isArray(values[0]) ? values as unknown[][] : [values as unknown[]];
   const headers = rows[0]?.map((cell) => String(cell ?? "").trim()) ?? [];
 
   return rows.slice(1).map((row) =>
     Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))
   );
+}
+
+async function sanitizeWorkbookBuffer(buffer: Buffer): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+  const worksheetPaths = Object.keys(zip.files).filter((path) => /^xl\/worksheets\/.+\.xml$/i.test(path));
+  let changed = false;
+
+  for (const path of worksheetPaths) {
+    const file = zip.file(path);
+    if (!file) continue;
+
+    const xml = await file.async("string");
+    const sanitized = xml
+      .replace(/<c([^>]*\st="inlineStr"[^>]*)>\s*<\/c>/g, (_match, attrs: string) => `<c${removeInlineStringType(attrs)}></c>`)
+      .replace(/<c([^>]*\st="inlineStr"[^>]*)\/>/g, (_match, attrs: string) => `<c${removeInlineStringType(attrs)}/>`);
+
+    if (sanitized !== xml) {
+      zip.file(path, sanitized);
+      changed = true;
+    }
+  }
+
+  return changed ? Buffer.from(await zip.generateAsync({ type: "nodebuffer" })) : buffer;
+}
+
+function removeInlineStringType(attrs: string) {
+  return attrs.replace(/\s+t="inlineStr"/, "");
 }
 
 function findEmailColumn(row: Record<string, unknown>): string | null {

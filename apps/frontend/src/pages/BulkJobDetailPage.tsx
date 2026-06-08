@@ -60,7 +60,10 @@ export function BulkJobDetailPage() {
       ["Risky", progress.risky],
       ["Unknown", progress.unknown],
       ["Syntax invalid", progress.syntaxInvalid],
-      ["Duplicates", progress.duplicatesRemoved]
+      ["Duplicates", progress.duplicatesRemoved],
+      ["Elapsed", formatDuration(progress.elapsedSeconds)],
+      ["ETA", formatDuration(progress.estimatedRemainingSeconds)],
+      ["Rate", `${progress.recordsPerSecond}/s`]
     ];
   }, [progress]);
 
@@ -80,7 +83,9 @@ export function BulkJobDetailPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-semibold text-zinc-950">{job.filename}</h2>
-            <p className="mt-1 text-sm text-zinc-500">{job.mode ?? "pending mode"}</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              {progress.mode ?? "pending mode"}{progress.reacherJobId ? ` · Reacher job ${progress.reacherJobId}` : ""}
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -203,3 +208,9 @@ export function BulkJobDetailPage() {
   );
 }
 
+function formatDuration(totalSeconds: number) {
+  if (!totalSeconds) return "0s";
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}

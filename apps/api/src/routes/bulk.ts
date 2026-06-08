@@ -10,6 +10,13 @@ import {
 } from "@e-verify-it/backend";
 
 const downloadKinds = new Set(["all", "valid", "invalid", "risky", "unknown", "smtp-result"]);
+const allowedMimeTypes = new Set([
+  "text/csv",
+  "application/csv",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/octet-stream"
+]);
 
 export async function bulkRoutes(app: FastifyInstance) {
   app.post("/api/bulk-jobs/upload", { preHandler: app.authenticate }, async (request, reply) => {
@@ -27,15 +34,49 @@ export async function bulkRoutes(app: FastifyInstance) {
       return;
     }
 
-    const buffer = await file.toBuffer();
+    if (file.mimetype && !allowedMimeTypes.has(file.mimetype)) {
+      reply.code(400).send({ message: `Unsupported file type: ${file.mimetype}` });
+      return;
+    }
+
+    let buffer: Buffer;
+    try {
+      buffer = await file.toBuffer();
+    } catch (error) {
+      const code = typeof error === "object" && error ? (error as { code?: string }).code : undefined;
+      if (code === "FST_REQ_FILE_TOO_LARGE") {
+        reply.code(413).send({ message: `File exceeds ${env.MAX_UPLOAD_MB} MB` });
+        return;
+      }
+
+      throw error;
+    }
+
     const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
     if (buffer.byteLength > maxBytes) {
       reply.code(413).send({ message: `File exceeds ${env.MAX_UPLOAD_MB} MB` });
       return;
     }
 
-    const parsed = await parseUploadFile(buffer, filename);
-    const job = await createBulkJobFromUpload(filename, parsed, request.admin?.id);
+    let parsed;
+    try {
+      parsed = await parseUploadFile(buffer, filename);
+    } catch (error) {
+      reply.code(400).send({ message: error instanceof Error ? error.message : "Could not parse upload file" });
+      return;
+    }
+
+    let job;
+    try {
+      job = await createBulkJobFromUpload(filename, parsed, request.admin?.id);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Redis/BullMQ")) {
+        reply.code(503).send({ message: error.message });
+        return;
+      }
+
+      throw error;
+    }
 
     reply.code(201).send({ job });
   });
@@ -95,6 +136,11 @@ export async function bulkRoutes(app: FastifyInstance) {
       progressPercentage: job.uniqueEmails ? Math.round((job.processed / job.uniqueEmails) * 100) : 100,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
+      elapsedSeconds: elapsedSeconds(job.startedAt, job.completedAt),
+      estimatedRemainingSeconds: estimatedRemainingSeconds(job.startedAt, job.completedAt, job.processed, job.uniqueEmails),
+      recordsPerSecond: recordsPerSecond(job.startedAt, job.completedAt, job.processed),
+      mode: job.mode,
+      reacherJobId: job.reacherJobId,
       errorMessage: job.errorMessage
     };
   });
@@ -165,4 +211,21 @@ export async function bulkRoutes(app: FastifyInstance) {
       .header("content-disposition", `attachment; filename="${job.filename}-${kind}.csv"`)
       .send(resultsToCsv(rows));
   });
+}
+
+function elapsedSeconds(startedAt: Date | null, completedAt: Date | null) {
+  if (!startedAt) return 0;
+  const end = completedAt ?? new Date();
+  return Math.max(0, Math.round((end.getTime() - startedAt.getTime()) / 1000));
+}
+
+function recordsPerSecond(startedAt: Date | null, completedAt: Date | null, processed: number) {
+  const elapsed = elapsedSeconds(startedAt, completedAt);
+  return elapsed > 0 ? Number((processed / elapsed).toFixed(2)) : 0;
+}
+
+function estimatedRemainingSeconds(startedAt: Date | null, completedAt: Date | null, processed: number, total: number) {
+  if (!startedAt || completedAt || processed <= 0 || total <= processed) return 0;
+  const rate = recordsPerSecond(startedAt, null, processed);
+  return rate > 0 ? Math.max(0, Math.round((total - processed) / rate)) : 0;
 }

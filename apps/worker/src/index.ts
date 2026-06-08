@@ -22,7 +22,7 @@ const worker = new Worker<BulkQueuePayload>(
 );
 
 worker.on("ready", () => {
-  console.log(`Bulk worker ready with local verification concurrency ${env.BULK_CONCURRENCY}`);
+  console.log(`Bulk worker ready; using Reacher /v1/bulk and polling every ${env.REACHER_BULK_POLL_INTERVAL_MS} ms`);
 });
 
 worker.on("failed", (job, error) => {
