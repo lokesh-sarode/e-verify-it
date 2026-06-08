@@ -24,7 +24,7 @@ function createBulkQueue() {
   return new Queue<BulkQueuePayload>(bulkQueueName, {
     connection: createRedisConnection(),
     defaultJobOptions: {
-      attempts: 3,
+      attempts: 2,
       backoff: { type: "exponential", delay: 2000 },
       removeOnComplete: { age: 60 * 60 * 24 * 7 },
       removeOnFail: { age: 60 * 60 * 24 * 14 }

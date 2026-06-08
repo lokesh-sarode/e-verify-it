@@ -18,6 +18,11 @@ export type ParsedUpload = {
   rejectedRows: UploadRejected[];
 };
 
+type ParsedUploadRow = {
+  rowNumber: number;
+  data: Record<string, unknown>;
+};
+
 const emailAliases = new Set([
   "email",
   "emails",
@@ -42,7 +47,7 @@ export async function parseUploadFile(buffer: Buffer, filename: string): Promise
     throw new Error("The uploaded file is empty");
   }
 
-  const emailKey = findEmailColumn(rows[0]);
+  const emailKey = findEmailColumn(rows[0].data);
   if (!emailKey) {
     throw new Error("The uploaded file must include an emails column");
   }
@@ -50,27 +55,34 @@ export async function parseUploadFile(buffer: Buffer, filename: string): Promise
   return normalizeRows(rows, emailKey);
 }
 
-function parseCsv(buffer: Buffer): Array<Record<string, unknown>> {
-  return parse(buffer, {
+function parseCsv(buffer: Buffer): ParsedUploadRow[] {
+  const records = parse(buffer, {
     bom: true,
     columns: true,
     skip_empty_lines: false,
     relax_column_count: true,
     trim: false
-  });
+  }) as Array<Record<string, unknown>>;
+
+  return records.map((data, index) => ({
+    rowNumber: index + 2,
+    data
+  }));
 }
 
-async function parseWorkbook(buffer: Buffer): Promise<Array<Record<string, unknown>>> {
+async function parseWorkbook(buffer: Buffer): Promise<ParsedUploadRow[]> {
   const workbook = await XlsxPopulate.fromDataAsync(await sanitizeWorkbookBuffer(buffer));
   const sheet = workbook.sheet(0);
   const usedRange = sheet?.usedRange();
   const values = usedRange?.value() ?? [];
   const rows = Array.isArray(values[0]) ? values as unknown[][] : [values as unknown[]];
   const headers = rows[0]?.map((cell) => String(cell ?? "").trim()) ?? [];
+  const dataRows = trimTrailingBlankRows(rows.slice(1));
 
-  return rows.slice(1).map((row) =>
-    Object.fromEntries(headers.map((header, index) => [header, row[index] ?? ""]))
-  );
+  return dataRows.map((row, index) => ({
+    rowNumber: index + 2,
+    data: Object.fromEntries(headers.map((header, headerIndex) => [header, row[headerIndex] ?? ""]))
+  }));
 }
 
 async function sanitizeWorkbookBuffer(buffer: Buffer): Promise<Buffer> {
@@ -110,47 +122,77 @@ function findEmailColumn(row: Record<string, unknown>): string | null {
   );
 }
 
-function normalizeRows(rows: Array<Record<string, unknown>>, emailKey: string): ParsedUpload {
+function normalizeRows(rows: ParsedUploadRow[], emailKey: string): ParsedUpload {
   const seen = new Set<string>();
   const rejectedRows: UploadRejected[] = [];
   const uniqueEmails: Array<{ email: string; normalizedEmail: string }> = [];
+  let originalRows = 0;
   let emptyRows = 0;
   let duplicateRows = 0;
   let syntaxInvalidRows = 0;
 
-  rows.forEach((row, index) => {
-    const rowNumber = index + 2;
-    const rawValue = row[emailKey] === undefined || row[emailKey] === null ? "" : String(row[emailKey]);
+  for (const row of rows) {
+    if (isRecordBlank(row.data)) continue;
+
+    originalRows += 1;
+
+    const rawValue = row.data[emailKey] === undefined || row.data[emailKey] === null ? "" : String(row.data[emailKey]);
     const normalizedEmail = normalizeEmail(rawValue);
 
     if (!normalizedEmail) {
       emptyRows += 1;
-      rejectedRows.push({ rowNumber, emailRaw: rawValue, reason: "empty" });
-      return;
+      rejectedRows.push({ rowNumber: row.rowNumber, emailRaw: rawValue, reason: "empty" });
+      continue;
     }
 
     if (!isValidEmailSyntax(normalizedEmail)) {
       syntaxInvalidRows += 1;
-      rejectedRows.push({ rowNumber, emailRaw: rawValue, reason: "invalid_syntax" });
-      return;
+      rejectedRows.push({ rowNumber: row.rowNumber, emailRaw: rawValue, reason: "invalid_syntax" });
+      continue;
     }
 
     if (seen.has(normalizedEmail)) {
       duplicateRows += 1;
-      rejectedRows.push({ rowNumber, emailRaw: rawValue, reason: "duplicate" });
-      return;
+      rejectedRows.push({ rowNumber: row.rowNumber, emailRaw: rawValue, reason: "duplicate" });
+      continue;
     }
 
     seen.add(normalizedEmail);
     uniqueEmails.push({ email: rawValue.trim(), normalizedEmail });
-  });
+  }
+
+  if (originalRows === 0) {
+    throw new Error("The uploaded file does not contain any email rows");
+  }
 
   return {
-    originalRows: rows.length,
+    originalRows,
     emptyRows,
     duplicateRows,
     syntaxInvalidRows,
     uniqueEmails,
     rejectedRows
   };
+}
+
+function trimTrailingBlankRows(rows: unknown[][]): unknown[][] {
+  let lastContentIndex = rows.length - 1;
+
+  while (lastContentIndex >= 0 && isArrayRowBlank(rows[lastContentIndex])) {
+    lastContentIndex -= 1;
+  }
+
+  return lastContentIndex >= 0 ? rows.slice(0, lastContentIndex + 1) : [];
+}
+
+function isRecordBlank(row: Record<string, unknown>) {
+  return Object.values(row).every(isBlankCell);
+}
+
+function isArrayRowBlank(row: unknown[] | undefined) {
+  return !row || row.every(isBlankCell);
+}
+
+function isBlankCell(value: unknown) {
+  return value === undefined || value === null || String(value).trim() === "";
 }

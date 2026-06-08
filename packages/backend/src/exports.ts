@@ -1,4 +1,4 @@
-import type { BulkJobEmail, VerificationResult } from "@prisma/client";
+import type { BulkJobEmail, UploadRejectedRow, VerificationResult } from "@prisma/client";
 
 type ExportableResult = BulkJobEmail | VerificationResult;
 
@@ -40,6 +40,17 @@ export function resultsToCsv(results: ExportableResult[]): string {
   return [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
 }
 
+export function rejectedRowsToCsv(rows: UploadRejectedRow[]): string {
+  const rejectedHeaders = ["row_number", "email", "reason"];
+  const rejectedRows = rows.map((row) => [
+    row.rowNumber,
+    row.emailRaw ?? "",
+    row.reason
+  ]);
+
+  return [rejectedHeaders, ...rejectedRows].map((row) => row.map(csvEscape).join(",")).join("\n");
+}
+
 function serializeNullable(value: boolean | null | undefined): string {
   if (value === null || value === undefined) return "";
   return value ? "true" : "false";
@@ -49,4 +60,3 @@ function csvEscape(value: unknown): string {
   const text = value === null || value === undefined ? "" : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
-

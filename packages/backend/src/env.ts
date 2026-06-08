@@ -20,7 +20,7 @@ const EnvSchema = z.object({
   REACHER_API_KEY: z.string().optional().default(""),
   REACHER_BULK_POLL_INTERVAL_MS: numberFromEnv(4000),
   REACHER_BULK_RESULTS_PAGE_SIZE: numberFromEnv(500),
-  REACHER_TIMEOUT_MS: numberFromEnv(60000),
+  REACHER_TIMEOUT_MS: numberFromEnv(15000),
   VERIFICATION_CACHE_DAYS: numberFromEnv(7),
   MAX_UPLOAD_MB: numberFromEnv(20),
   FRONTEND_URL: z.string().url().default("http://localhost:5173"),

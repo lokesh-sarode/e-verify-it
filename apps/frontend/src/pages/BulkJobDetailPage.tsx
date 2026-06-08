@@ -9,7 +9,7 @@ import { CategoryBadge, StatusBadge } from "../components/StatusBadge";
 import type { BulkJob, BulkProgress, Category, VerificationResult } from "../types";
 
 const categories: Array<"all" | Category> = ["all", "valid", "invalid", "risky", "unknown"];
-const downloads = ["all", "valid", "invalid", "risky", "unknown", "smtp-result"];
+const downloads = ["all", "valid", "invalid", "risky", "unknown", "smtp-result", "duplicates"];
 
 export function BulkJobDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -155,21 +155,25 @@ export function BulkJobDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 border-b border-zinc-200 p-4">
-          {downloads.map((kind) => (
-            <a
-              key={kind}
-              href={`/api/bulk-jobs/${id}/download/${kind}`}
-              className={[
-                "focus-ring inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium",
-                canDownload
-                  ? "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
-                  : "pointer-events-none border-zinc-200 bg-zinc-100 text-zinc-400"
-              ].join(" ")}
-            >
-              <Download size={16} />
-              {kind}
-            </a>
-          ))}
+          {downloads.map((kind) => {
+            const isAvailable = canDownload || (kind === "duplicates" && progress.duplicatesRemoved > 0);
+
+            return (
+              <a
+                key={kind}
+                href={`/api/bulk-jobs/${id}/download/${kind}`}
+                className={[
+                  "focus-ring inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium",
+                  isAvailable
+                    ? "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                    : "pointer-events-none border-zinc-200 bg-zinc-100 text-zinc-400"
+                ].join(" ")}
+              >
+                <Download size={16} />
+                {kind}
+              </a>
+            );
+          })}
         </div>
 
         <div className="overflow-x-auto">

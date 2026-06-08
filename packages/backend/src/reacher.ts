@@ -11,7 +11,9 @@ export class ReacherHttpError extends Error {
 }
 
 export class ReacherWorkerModeUnavailableError extends Error {
-  constructor(message = "Reacher worker mode is unavailable") {
+  constructor(
+    message = "Reacher worker mode is unavailable. Enable Reacher's RabbitMQ worker architecture for /v1/bulk: set RCH__WORKER__ENABLE=true, configure RCH__WORKER__RABBITMQ__URL, and configure Reacher Postgres storage."
+  ) {
     super(message);
   }
 }
@@ -120,7 +122,7 @@ export class ReacherClient {
     assertReacherConfigured(this.baseUrl);
 
     const retry = options.retry ?? true;
-    const maxAttempts = retry ? 4 : 1;
+    const maxAttempts = retry ? 2 : 1;
     let attempt = 0;
 
     while (attempt < maxAttempts) {

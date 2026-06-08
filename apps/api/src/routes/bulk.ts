@@ -5,11 +5,12 @@ import {
   env,
   parseUploadFile,
   prisma,
+  rejectedRowsToCsv,
   resultsToCsv,
   sanitizeFilename
 } from "@e-verify-it/backend";
 
-const downloadKinds = new Set(["all", "valid", "invalid", "risky", "unknown", "smtp-result"]);
+const downloadKinds = new Set(["all", "valid", "invalid", "risky", "unknown", "smtp-result", "duplicates"]);
 const allowedMimeTypes = new Set([
   "text/csv",
   "application/csv",
@@ -177,6 +178,30 @@ export async function bulkRoutes(app: FastifyInstance) {
     const job = await prisma.bulkJob.findUnique({ where: { id } });
     if (!job) {
       reply.code(404).send({ message: "Bulk job not found" });
+      return;
+    }
+
+    if (kind === "duplicates") {
+      const rows = await prisma.uploadRejectedRow.findMany({
+        where: {
+          bulkJobId: id,
+          reason: "duplicate"
+        },
+        orderBy: { rowNumber: "asc" }
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          adminId: request.admin?.id,
+          action: "download",
+          meta: { bulkJobId: id, kind, rowCount: rows.length }
+        }
+      });
+
+      reply
+        .header("content-type", "text/csv; charset=utf-8")
+        .header("content-disposition", `attachment; filename="${job.filename}-duplicates.csv"`)
+        .send(rejectedRowsToCsv(rows));
       return;
     }
 

@@ -6,6 +6,8 @@ The app supports admin login, single email verification with `POST /v1/check_ema
 
 This project assumes your Reacher API already has worker/bulk processing enabled. The app does not need to run RabbitMQ or Reacher worker containers itself.
 
+The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request by default.
+
 ## Stack
 
 - Frontend: React, Vite, TypeScript, Tailwind CSS, TanStack Query, Axios, React Router
@@ -101,6 +103,40 @@ Bulk verification:
 
 The app stores the Reacher `job_id`, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
 
+## Reacher Worker Mode
+
+The `Reacher worker mode is unavailable` error means this app reached your Reacher API, but the Reacher `/v1/bulk` endpoint rejected the job because Reacher's queue/worker architecture is not enabled.
+
+For hosted Reacher, use `REACHER_BASE_URL=https://api.reacher.email/v1` and set `REACHER_API_KEY`; worker mode is handled by Reacher.
+
+For self-hosted Reacher v1, enable the RabbitMQ-based worker architecture on the Reacher side, not in this app:
+
+- Run a Reacher HTTP server.
+- Run RabbitMQ.
+- Run one or more Reacher worker containers.
+- Configure Reacher Postgres storage for verification results.
+- Set `RCH__WORKER__ENABLE=true` on Reacher worker containers.
+- Set `RCH__WORKER__RABBITMQ__URL=amqp://...` on Reacher HTTP/worker containers.
+- Set Reacher Postgres storage, for example `RCH__STORAGE__0__POSTGRES__DB_URL=postgresql://...` on current Reacher versions.
+- Optionally set `RCH__WORKER__RABBITMQ__CONCURRENCY=5` and Reacher throttle values to control throughput.
+
+Docs:
+
+- `https://docs.reacher.email/self-hosting/scaling-for-production/option-2-rabbitmq-based-queue-architecture`
+- `https://docs.reacher.email/self-hosting/reacher-configuration-v0.10`
+- `https://docs.reacher.email/advanced/openapi/v1-bulk`
+
+After enabling it, verify:
+
+```bash
+curl -X POST "$REACHER_BASE_URL/bulk" \
+  -H "Authorization: $REACHER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"input\":[\"test@example.com\"]}"
+```
+
+The response must include `job_id`. Then `GET $REACHER_BASE_URL/bulk/{job_id}` should return `job_status`, `total_records`, and `total_processed`.
+
 ## App API Routes
 
 Auth:
@@ -126,6 +162,7 @@ Bulk:
 - `GET /api/bulk-jobs/:id/download/risky`
 - `GET /api/bulk-jobs/:id/download/unknown`
 - `GET /api/bulk-jobs/:id/download/smtp-result`
+- `GET /api/bulk-jobs/:id/download/duplicates`
 
 Admin/config:
 
@@ -140,6 +177,8 @@ Admin/config:
 - CSV parser: `csv-parse/sync` with headers
 - Excel parser: `xlsx-populate` reading the first sheet via `usedRange().value()`
 - XLSX sanitizer: `jszip` normalizes empty inline-string cells before parsing
+- Fully blank rows are ignored and are not counted as original, empty, rejected, or verification rows
+- Rows with other data but no email are counted as empty rows
 
 Accepted email columns:
 
@@ -151,7 +190,7 @@ Accepted email columns:
 - `email_address`
 - `Email Address`
 
-Rows are normalized, lowercased, syntax-validated, and deduplicated before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher.
+Rows are normalized, lowercased, syntax-validated, and deduplicated before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher. Duplicate rows can be downloaded from the bulk job page as `duplicates.csv`, even if Reacher worker mode fails later.
 
 ## Progress
 
@@ -166,6 +205,7 @@ Bulk job detail page:
 - Polls every 4 seconds while running
 - Shows processed count, category counters, elapsed time, ETA, and records per second
 - Enables downloads only when the job is completed
+- Enables duplicate download as soon as duplicates are known
 
 ## Troubleshooting
 
@@ -208,6 +248,7 @@ Bulk job stuck in `processing`
 
 - Confirm `REACHER_BASE_URL` includes `/v1`.
 - Confirm Reacher worker/bulk mode is enabled on your Reacher API side.
+- For self-hosted Reacher v1, confirm `RCH__WORKER__ENABLE=true`, `RCH__WORKER__RABBITMQ__URL`, and Reacher Postgres storage are configured.
 - Confirm `POST {REACHER_BASE_URL}/bulk` returns a `job_id`.
 - Confirm `GET {REACHER_BASE_URL}/bulk/{job_id}` returns `job_status`, `total_records`, and `total_processed`.
 
