@@ -18,7 +18,6 @@ const EnvSchema = z.object({
   COOKIE_SECRET: z.string().min(24).default("change_this_cookie_secret_24"),
   REACHER_BASE_URL: z.string().url().default("https://verify.example.com/v1"),
   REACHER_API_KEY: z.string().optional().default(""),
-  REACHER_BULK_POLL_INTERVAL_MS: numberFromEnv(4000),
   REACHER_BULK_RESULTS_PAGE_SIZE: numberFromEnv(500),
   REACHER_TIMEOUT_MS: numberFromEnv(15000),
   VERIFICATION_CACHE_DAYS: numberFromEnv(7),

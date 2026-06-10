@@ -4,11 +4,19 @@ import {
   createBulkJobFromUpload,
   env,
   parseUploadFile,
+  prepareBulkUpload,
   prisma,
   rejectedRowsToCsv,
   resultsToCsv,
   sanitizeFilename
 } from "@e-verify-it/backend";
+import { z } from "zod";
+import {
+  bulkPreviewSummary,
+  deleteBulkPreview,
+  readBulkPreview,
+  saveBulkPreview
+} from "../bulkPreviewStore";
 
 const downloadKinds = new Set(["all", "valid", "invalid", "risky", "unknown", "smtp-result", "duplicates"]);
 const allowedMimeTypes = new Set([
@@ -19,7 +27,67 @@ const allowedMimeTypes = new Set([
   "application/octet-stream"
 ]);
 
+const CreateFromPreviewSchema = z.object({
+  previewId: z.string().uuid()
+});
+
+class UploadRequestError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export async function bulkRoutes(app: FastifyInstance) {
+  app.post("/api/bulk-jobs/preview", { preHandler: app.authenticate }, async (request, reply) => {
+    const file = await request.file();
+
+    if (!file) {
+      reply.code(400).send({ message: "Upload a CSV or XLSX file" });
+      return;
+    }
+
+    try {
+      const { filename, prepared } = await prepareUpload(file);
+      const preview = await saveBulkPreview(filename, prepared);
+      reply.code(201).send({ preview: bulkPreviewSummary(preview) });
+    } catch (error) {
+      if (error instanceof UploadRequestError) {
+        reply.code(error.statusCode).send({ message: error.message });
+        return;
+      }
+
+      throw error;
+    }
+  });
+
+  app.post("/api/bulk-jobs/from-preview", { preHandler: app.authenticate }, async (request, reply) => {
+    const body = CreateFromPreviewSchema.parse(request.body);
+    const preview = await readBulkPreview(body.previewId);
+
+    if (!preview) {
+      reply.code(404).send({ message: "Bulk preview expired or was not found. Upload the file again." });
+      return;
+    }
+
+    let job;
+    try {
+      job = await createBulkJobFromUpload(preview.filename, preview.prepared, request.admin?.id);
+      await deleteBulkPreview(preview.id);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("Redis/BullMQ")) {
+        reply.code(503).send({ message: error.message });
+        return;
+      }
+
+      throw error;
+    }
+
+    reply.code(201).send({ job });
+  });
+
   app.post("/api/bulk-jobs/upload", { preHandler: app.authenticate }, async (request, reply) => {
     const file = await request.file();
 
@@ -28,48 +96,22 @@ export async function bulkRoutes(app: FastifyInstance) {
       return;
     }
 
-    const filename = sanitizeFilename(file.filename);
-    const extension = filename.split(".").pop()?.toLowerCase();
-    if (!["csv", "xlsx"].includes(extension ?? "")) {
-      reply.code(400).send({ message: "Only CSV and XLSX files are supported" });
-      return;
-    }
-
-    if (file.mimetype && !allowedMimeTypes.has(file.mimetype)) {
-      reply.code(400).send({ message: `Unsupported file type: ${file.mimetype}` });
-      return;
-    }
-
-    let buffer: Buffer;
+    let filename;
+    let prepared;
     try {
-      buffer = await file.toBuffer();
+      ({ filename, prepared } = await prepareUpload(file));
     } catch (error) {
-      const code = typeof error === "object" && error ? (error as { code?: string }).code : undefined;
-      if (code === "FST_REQ_FILE_TOO_LARGE") {
-        reply.code(413).send({ message: `File exceeds ${env.MAX_UPLOAD_MB} MB` });
+      if (error instanceof UploadRequestError) {
+        reply.code(error.statusCode).send({ message: error.message });
         return;
       }
 
       throw error;
     }
 
-    const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
-    if (buffer.byteLength > maxBytes) {
-      reply.code(413).send({ message: `File exceeds ${env.MAX_UPLOAD_MB} MB` });
-      return;
-    }
-
-    let parsed;
-    try {
-      parsed = await parseUploadFile(buffer, filename);
-    } catch (error) {
-      reply.code(400).send({ message: error instanceof Error ? error.message : "Could not parse upload file" });
-      return;
-    }
-
     let job;
     try {
-      job = await createBulkJobFromUpload(filename, parsed, request.admin?.id);
+      job = await createBulkJobFromUpload(filename, prepared, request.admin?.id);
     } catch (error) {
       if (error instanceof Error && error.message.includes("Redis/BullMQ")) {
         reply.code(503).send({ message: error.message });
@@ -127,6 +169,8 @@ export async function bulkRoutes(app: FastifyInstance) {
       status: job.status,
       totalRows: job.originalRows,
       uniqueEmails: job.uniqueEmails,
+      reacherEmails: job.reacherEmails,
+      prefilteredEmails: job.prefilteredEmails,
       processed: job.processed,
       valid: job.validCount,
       invalid: job.invalidCount,
@@ -134,6 +178,9 @@ export async function bulkRoutes(app: FastifyInstance) {
       unknown: job.unknownCount,
       syntaxInvalid: job.syntaxInvalidRows,
       duplicatesRemoved: job.duplicateRows,
+      noMxRows: job.noMxRows,
+      disposableRows: job.disposableRows,
+      mxLookupFailedRows: job.mxLookupFailedRows,
       progressPercentage: job.uniqueEmails ? Math.round((job.processed / job.uniqueEmails) * 100) : 100,
       startedAt: job.startedAt,
       completedAt: job.completedAt,
@@ -253,4 +300,47 @@ function estimatedRemainingSeconds(startedAt: Date | null, completedAt: Date | n
   if (!startedAt || completedAt || processed <= 0 || total <= processed) return 0;
   const rate = recordsPerSecond(startedAt, null, processed);
   return rate > 0 ? Math.max(0, Math.round((total - processed) / rate)) : 0;
+}
+
+type UploadedFile = {
+  filename: string;
+  mimetype: string;
+  toBuffer(): Promise<Buffer>;
+};
+
+async function prepareUpload(file: UploadedFile) {
+  const filename = sanitizeFilename(file.filename);
+  const extension = filename.split(".").pop()?.toLowerCase();
+  if (!["csv", "xlsx"].includes(extension ?? "")) {
+    throw new UploadRequestError(400, "Only CSV and XLSX files are supported");
+  }
+
+  if (file.mimetype && !allowedMimeTypes.has(file.mimetype)) {
+    throw new UploadRequestError(400, `Unsupported file type: ${file.mimetype}`);
+  }
+
+  let buffer: Buffer;
+  try {
+    buffer = await file.toBuffer();
+  } catch (error) {
+    const code = typeof error === "object" && error ? (error as { code?: string }).code : undefined;
+    if (code === "FST_REQ_FILE_TOO_LARGE") {
+      throw new UploadRequestError(413, `File exceeds ${env.MAX_UPLOAD_MB} MB`);
+    }
+
+    throw error;
+  }
+
+  const maxBytes = env.MAX_UPLOAD_MB * 1024 * 1024;
+  if (buffer.byteLength > maxBytes) {
+    throw new UploadRequestError(413, `File exceeds ${env.MAX_UPLOAD_MB} MB`);
+  }
+
+  try {
+    const parsed = await parseUploadFile(buffer, filename);
+    const prepared = await prepareBulkUpload(parsed);
+    return { filename, prepared };
+  } catch (error) {
+    throw new UploadRequestError(400, error instanceof Error ? error.message : "Could not parse upload file");
+  }
 }
