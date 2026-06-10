@@ -75,7 +75,7 @@ docker compose logs -f api
 docker compose logs -f worker
 ```
 
-Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening.
+Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening. The worker waits for the API health check so it does not poll bulk jobs before the database schema is ready.
 
 Caddy serves HTTP for `APP_DOMAIN=:80`. For a real hostname, set `APP_DOMAIN=your-domain.com` and `FRONTEND_URL=https://your-domain.com`; Caddy will handle HTTPS.
 
@@ -252,6 +252,13 @@ Bulk job detail page:
 - Bulk job creation no longer stores all upload rows inside one Prisma interactive transaction.
 - Pull the latest code, rebuild the API, and restart the worker/API.
 - For Docker Desktop, run `docker compose up -d --build`.
+
+Worker logs `The table public.BulkJob does not exist` or Prisma `P2021`
+
+- The worker reached the database before Prisma migrations created the bulk tables, or the worker is pointing at a different database than the API.
+- Pull the latest code and rebuild with `docker compose up -d --build`; the worker now waits for the API migration/health step before starting.
+- Check `docker compose logs -f api` and confirm Prisma migrations completed successfully.
+- Confirm `DATABASE_URL` is the same for API and worker.
 
 Single verification returns `fetch failed`
 
