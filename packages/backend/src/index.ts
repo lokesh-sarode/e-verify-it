@@ -4,7 +4,6 @@ export * from "./classifier";
 export * from "./email";
 export * from "./env";
 export * from "./exports";
-export * from "./fastFilter";
 export * from "./prisma";
 export * from "./queue";
 export * from "./reacher";

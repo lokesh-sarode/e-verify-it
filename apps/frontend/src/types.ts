@@ -35,11 +35,6 @@ export type BulkJob = {
   duplicateRows: number;
   syntaxInvalidRows: number;
   uniqueEmails: number;
-  reacherEmails: number;
-  prefilteredEmails: number;
-  noMxRows: number;
-  disposableRows: number;
-  mxLookupFailedRows: number;
   processed: number;
   validCount: number;
   invalidCount: number;
@@ -58,8 +53,6 @@ export type BulkProgress = {
   reacherJobId: string | null;
   totalRows: number;
   uniqueEmails: number;
-  reacherEmails: number;
-  prefilteredEmails: number;
   processed: number;
   valid: number;
   invalid: number;
@@ -67,9 +60,6 @@ export type BulkProgress = {
   unknown: number;
   syntaxInvalid: number;
   duplicatesRemoved: number;
-  noMxRows: number;
-  disposableRows: number;
-  mxLookupFailedRows: number;
   progressPercentage: number;
   startedAt: string | null;
   completedAt: string | null;
@@ -95,25 +85,4 @@ export type AppConfig = {
   uploadExtensions: string[];
   reacherBaseUrlConfigured: boolean;
   reacherBaseUrl: string | null;
-};
-
-export type BulkPreview = {
-  id: string;
-  filename: string;
-  createdAt: string;
-  originalRows: number;
-  emptyRows: number;
-  duplicateRows: number;
-  syntaxInvalidRows: number;
-  uniqueEmails: number;
-  prefilteredEmails: number;
-  reacherEmails: number;
-  noMxRows: number;
-  disposableRows: number;
-  mxLookupFailedRows: number;
-  rejectedRows: Array<{
-    rowNumber: number;
-    emailRaw: string | null;
-    reason: "empty" | "duplicate" | "invalid_syntax";
-  }>;
 };
