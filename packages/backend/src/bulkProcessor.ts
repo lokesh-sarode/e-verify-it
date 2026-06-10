@@ -7,6 +7,7 @@ import { ReacherClient } from "./reacher";
 import type { PreparedBulkUpload } from "./fastFilter";
 
 const createManyBatchSize = 1000;
+const remoteZeroProgressWarningMs = 2 * 60 * 1000;
 
 function asJson(value: unknown): Prisma.InputJsonValue {
   return (value ?? {}) as Prisma.InputJsonValue;
@@ -169,6 +170,7 @@ export async function submitBulkJobToReacher(bulkJobId: string) {
   }
 
   try {
+    console.log(`Submitting bulk job ${bulkJobId} to Reacher with ${emails.length} emails`);
     await submitWithReacherBulk(bulkJobId, emails, new ReacherClient());
   } catch (error) {
     await failJob(bulkJobId, error);
@@ -185,6 +187,10 @@ export async function pollActiveReacherBulkJobs(client = new ReacherClient()) {
     orderBy: { startedAt: "asc" },
     take: 25
   });
+
+  if (jobs.length) {
+    console.log(`Polling ${jobs.length} active Reacher bulk job${jobs.length === 1 ? "" : "s"}`);
+  }
 
   for (const job of jobs) {
     try {
@@ -205,7 +211,11 @@ export async function pollReacherBulkJob(bulkJobId: string, client = new Reacher
   if (!job || job.status !== "processing" || !job.reacherJobId) return;
 
   const progress = readBulkProgress(await client.getBulkProgress(job.reacherJobId), job.reacherEmails);
-  await updateJobFromRemoteProgress(bulkJobId, progress);
+  console.log(
+    `Reacher bulk job ${job.reacherJobId} for bulk job ${bulkJobId}: ${progress.rawStatus ?? progress.status} ${progress.processed}/${job.reacherEmails}`
+  );
+
+  await updateJobFromRemoteProgress(bulkJobId, progress, remoteProgressWarning(job, progress));
 
   if (progress.status === "failed") {
     await failJob(bulkJobId, `Reacher bulk job ${job.reacherJobId} ended with status ${progress.rawStatus ?? "failed"}`);
@@ -225,6 +235,7 @@ export async function pollReacherBulkJob(bulkJobId: string, client = new Reacher
 async function submitWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[], client: ReacherClient) {
   const normalizedEmails = emails.map((email) => email.normalizedEmail);
   const { jobId } = await client.createBulkJob(normalizedEmails);
+  console.log(`Bulk job ${bulkJobId} submitted to Reacher as remote job ${jobId}`);
 
   await prisma.bulkJob.update({
     where: { id: bulkJobId },
@@ -413,7 +424,7 @@ async function completedCountsForJob(bulkJobId: string) {
   };
 }
 
-async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBulkProgress) {
+async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBulkProgress, warningMessage: string | null) {
   const storedCounts = await completedCountsForJob(bulkJobId);
 
   await prisma.bulkJob.update({
@@ -424,9 +435,22 @@ async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBu
       invalidCount: storedCounts.invalid + progress.invalid,
       riskyCount: storedCounts.risky + progress.risky,
       unknownCount: storedCounts.unknown + progress.unknown,
-      errorMessage: null
+      errorMessage: warningMessage
     }
   });
+}
+
+function remoteProgressWarning(
+  job: { startedAt: Date | null; reacherJobId: string | null; reacherEmails: number },
+  progress: RemoteBulkProgress
+) {
+  if (progress.status !== "running" || progress.processed > 0 || !job.startedAt) return null;
+  if (Date.now() - job.startedAt.getTime() < remoteZeroProgressWarningMs) return null;
+
+  return [
+    `Reacher job ${job.reacherJobId ?? "unknown"} is still running with 0/${job.reacherEmails} emails processed.`,
+    "The app submitted the job successfully, but the Reacher worker/RabbitMQ side is not consuming it yet."
+  ].join(" ");
 }
 
 async function failJob(bulkJobId: string, error: unknown) {

@@ -6,7 +6,7 @@ The app supports admin login, single email verification with `POST /v1/check_ema
 
 This project assumes your Reacher API already has worker/bulk processing enabled. The app does not need to run RabbitMQ or Reacher worker containers itself.
 
-The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request by default.
+The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request. `REACHER_TIMEOUT_MS` is capped at 15000 ms so older local overrides cannot make verification hang for 60 seconds.
 
 ## Stack
 
@@ -275,6 +275,8 @@ Bulk job stuck in `processing`
 - For self-hosted Reacher v1, confirm `RCH__WORKER__ENABLE=true`, `RCH__WORKER__RABBITMQ__URL`, and Reacher Postgres storage are configured.
 - Confirm `POST {REACHER_BASE_URL}/bulk` returns a `job_id`.
 - Confirm `GET {REACHER_BASE_URL}/bulk/{job_id}` returns `job_status`, `total_records`, and `total_processed`.
+- If Reacher returns `job_status=Running` but `total_processed=0` for several minutes, this app already submitted the job successfully. Check Reacher worker container logs, RabbitMQ connectivity, and Reacher storage configuration because Reacher is not consuming its own queued job.
+- Worker logs should show `submitted to Reacher as remote job ...` and then `Running processed/total` every 30 seconds while polling.
 
 Login fails
 
