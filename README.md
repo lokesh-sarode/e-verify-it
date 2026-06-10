@@ -2,17 +2,17 @@
 
 Internal admin-only email verification dashboard powered by Reacher v1 APIs.
 
-The app supports admin login, single email verification with `POST /v1/check_email`, bulk jobs with `POST /v1/bulk`, CSV/XLSX uploads, syntax filtering, deduplication, live progress, timing counters, categorized CSV downloads, PostgreSQL persistence, Redis/BullMQ job orchestration, and Docker/Caddy deployment.
+The app supports admin login, single email verification with `POST /v1/check_email`, bulk jobs with `POST /v1/bulk`, CSV/XLSX upload preview, syntax/MX/disposable prefiltering, deduplication, live progress, timing counters, categorized CSV downloads, PostgreSQL persistence, Redis/BullMQ job orchestration, and Docker/Caddy deployment.
 
 This project assumes your Reacher API already has worker/bulk processing enabled. The app does not need to run RabbitMQ or Reacher worker containers itself.
 
-The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request by default.
+The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request. `REACHER_TIMEOUT_MS` is capped at 15000 ms so older local overrides cannot make verification hang for 60 seconds.
 
 ## Stack
 
 - Frontend: React, Vite, TypeScript, Tailwind CSS, TanStack Query, Axios, React Router
 - API: Node.js, TypeScript, Fastify, Zod, Prisma, PostgreSQL
-- Worker: Node.js, BullMQ, Redis
+- Worker: Node.js, BullMQ submit worker, 30-second Reacher polling loop, Redis
 - Upload parsing: `csv-parse` for CSV, `xlsx-populate` plus `jszip` XLSX sanitization for Excel
 - Deployment: Docker Compose, Caddy reverse proxy
 
@@ -75,7 +75,7 @@ docker compose logs -f api
 docker compose logs -f worker
 ```
 
-Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening.
+Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening. The worker waits for the API health check so it does not poll bulk jobs before the database schema is ready.
 
 Caddy serves HTTP for `APP_DOMAIN=:80`. For a real hostname, set `APP_DOMAIN=your-domain.com` and `FRONTEND_URL=https://your-domain.com`; Caddy will handle HTTPS.
 
@@ -95,13 +95,15 @@ Single email verification:
 
 Bulk verification:
 
+- Preview route: `POST /api/bulk-jobs/preview`
+- Start-from-preview route: `POST /api/bulk-jobs/from-preview`
 - App route: `POST /api/bulk-jobs/upload`
 - Reacher route: `POST {REACHER_BASE_URL}/bulk`
 - Reacher body: `{ "input": ["a@example.com", "b@example.com"] }`
 - Progress: `GET {REACHER_BASE_URL}/bulk/{job_id}`
 - Results: `GET {REACHER_BASE_URL}/bulk/{job_id}/results?limit=500&offset=0`
 
-The app stores the Reacher `job_id`, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
+The upload page first calls preview, which parses the file and runs local Stage 1 filtering without creating a job. When the admin confirms, the API creates the job, the BullMQ submit worker sends only Stage 2 emails to Reacher, stores the Reacher `job_id`, and exits. A separate polling loop runs every 30 seconds, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page after Reacher reports completion.
 
 ## Reacher Worker Mode
 
@@ -151,6 +153,8 @@ Single:
 
 Bulk:
 
+- `POST /api/bulk-jobs/preview`
+- `POST /api/bulk-jobs/from-preview`
 - `POST /api/bulk-jobs/upload`
 - `GET /api/bulk-jobs`
 - `GET /api/bulk-jobs/:id`
@@ -179,6 +183,11 @@ Admin/config:
 - XLSX sanitizer: `jszip` normalizes empty inline-string cells before parsing
 - Fully blank rows are ignored and are not counted as original, empty, rejected, or verification rows
 - Rows with other data but no email are counted as empty rows
+- Stage 1 filters run before Reacher: invalid syntax, malformed rows, no MX, disposable domains, and temporary MX lookup failures
+- MX checks use DNS lookups cached per domain during the request
+- Disposable checks use a local disposable domain list
+- No-MX rows are stored as invalid, disposable rows as risky, and temporary MX lookup failures as unknown
+- Only Stage 2 emails are submitted to Reacher `/v1/bulk`
 
 Accepted email columns:
 
@@ -190,14 +199,22 @@ Accepted email columns:
 - `email_address`
 - `Email Address`
 
-Rows are normalized, lowercased, syntax-validated, and deduplicated before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher. Duplicate rows can be downloaded from the bulk job page as `duplicates.csv`, even if Reacher worker mode fails later.
+Rows are normalized, lowercased, syntax-validated, deduplicated, MX-checked, and disposable-domain checked before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher. Duplicate rows can be downloaded from the bulk job page as `duplicates.csv`, even if Reacher worker mode fails later.
+
+## Classification Rules
+
+- Invalid: syntax invalid, no MX, Reacher `is_reachable=invalid`, or SMTP says mailbox not found, rejected, disabled, undeliverable, or user unknown.
+- Risky: catch-all, disposable, role account, SMTP timeout, SMTP temporary failure, SMTP/headless/browser disconnected, or any SMTP error without a definitive mailbox result.
+- Valid: Reacher `is_reachable=safe` with no `smtp.error`, or `smtp.is_deliverable=true`.
+- Unknown: insufficient data, Reacher says unknown, DNS/MX lookup temporary failure, or missing SMTP result without enough evidence.
 
 ## Progress
 
 Upload page:
 
-- Shows upload percentage while the file is being sent
-- Shows parsed row counts after job creation
+- Shows upload percentage while the preview file is being sent
+- Shows parsed and Stage 1 counts before the job is created
+- Requires a second confirmation click to create/start the bulk job
 - Polls the created bulk job and shows processing progress, elapsed time, and ETA
 
 Bulk job detail page:
@@ -236,6 +253,13 @@ Bulk job detail page:
 - Pull the latest code, rebuild the API, and restart the worker/API.
 - For Docker Desktop, run `docker compose up -d --build`.
 
+Worker logs `The table public.BulkJob does not exist` or Prisma `P2021`
+
+- The worker reached the database before Prisma migrations created the bulk tables, or the worker is pointing at a different database than the API.
+- Pull the latest code and rebuild with `docker compose up -d --build`; the worker now waits for the API migration/health step before starting.
+- Check `docker compose logs -f api` and confirm Prisma migrations completed successfully.
+- Confirm `DATABASE_URL` is the same for API and worker.
+
 Single verification returns `fetch failed`
 
 - The API now returns a clearer Reacher configuration or network message.
@@ -251,6 +275,8 @@ Bulk job stuck in `processing`
 - For self-hosted Reacher v1, confirm `RCH__WORKER__ENABLE=true`, `RCH__WORKER__RABBITMQ__URL`, and Reacher Postgres storage are configured.
 - Confirm `POST {REACHER_BASE_URL}/bulk` returns a `job_id`.
 - Confirm `GET {REACHER_BASE_URL}/bulk/{job_id}` returns `job_status`, `total_records`, and `total_processed`.
+- If Reacher returns `job_status=Running` but `total_processed=0` for several minutes, this app already submitted the job successfully. Check Reacher worker container logs, RabbitMQ connectivity, and Reacher storage configuration because Reacher is not consuming its own queued job.
+- Worker logs should show `submitted to Reacher as remote job ...` and then `Running processed/total` every 30 seconds while polling.
 
 Login fails
 

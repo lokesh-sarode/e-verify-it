@@ -4,19 +4,17 @@ import { env } from "./env";
 import { enqueueBulkJob } from "./queue";
 import { prisma } from "./prisma";
 import { ReacherClient } from "./reacher";
-import type { ParsedUpload } from "./uploadParser";
+import type { PreparedBulkUpload } from "./fastFilter";
 
 const createManyBatchSize = 1000;
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+const remoteZeroProgressWarningMs = 2 * 60 * 1000;
 
 function asJson(value: unknown): Prisma.InputJsonValue {
   return (value ?? {}) as Prisma.InputJsonValue;
 }
 
-export async function createBulkJobFromUpload(filename: string, parsed: ParsedUpload, adminId?: string) {
+export async function createBulkJobFromUpload(filename: string, parsed: PreparedBulkUpload, adminId?: string) {
+  const initialCounts = countsForPrefilteredEmails(parsed);
   const bulkJob = await prisma.bulkJob.create({
     data: {
       filename,
@@ -25,18 +23,72 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
       duplicateRows: parsed.duplicateRows,
       syntaxInvalidRows: parsed.syntaxInvalidRows,
       uniqueEmails: parsed.uniqueEmails.length,
-      status: parsed.uniqueEmails.length === 0 ? "completed" : "pending",
-      completedAt: parsed.uniqueEmails.length === 0 ? new Date() : null
+      reacherEmails: parsed.reacherEmails.length,
+      prefilteredEmails: parsed.prefilteredEmails.length,
+      noMxRows: parsed.noMxRows,
+      disposableRows: parsed.disposableRows,
+      mxLookupFailedRows: parsed.mxLookupFailedRows,
+      processed: parsed.prefilteredEmails.length,
+      validCount: initialCounts.valid,
+      invalidCount: initialCounts.invalid,
+      riskyCount: initialCounts.risky,
+      unknownCount: initialCounts.unknown,
+      status: parsed.reacherEmails.length === 0 ? "completed" : "pending",
+      completedAt: parsed.reacherEmails.length === 0 ? new Date() : null
     }
   });
 
   try {
-    for (const chunk of chunks(parsed.uniqueEmails, createManyBatchSize)) {
+    for (const chunk of chunks(parsed.reacherEmails, createManyBatchSize)) {
       await prisma.bulkJobEmail.createMany({
         data: chunk.map((email) => ({
           bulkJobId: bulkJob.id,
           email: email.email,
           normalizedEmail: email.normalizedEmail
+        }))
+      });
+    }
+
+    for (const chunk of chunks(parsed.prefilteredEmails, createManyBatchSize)) {
+      await prisma.bulkJobEmail.createMany({
+        data: chunk.map((email) => ({
+          bulkJobId: bulkJob.id,
+          email: email.email,
+          normalizedEmail: email.normalizedEmail,
+          status: "completed",
+          category: email.result.category,
+          isReachable: email.result.isReachable,
+          syntaxStatus: email.result.syntaxStatus,
+          mxStatus: email.result.mxStatus,
+          smtpStatus: email.result.smtpStatus,
+          smtpResult: email.result.smtpResult,
+          catchAll: email.result.catchAll,
+          disposable: email.result.disposable,
+          roleAccount: email.result.roleAccount,
+          freeProvider: email.result.freeProvider,
+          reason: email.result.reason,
+          rawJson: asJson(email.result.rawJson),
+          checkedAt: new Date()
+        }))
+      });
+
+      await prisma.verificationResult.createMany({
+        data: chunk.map((email) => ({
+          email: email.email,
+          normalizedEmail: email.normalizedEmail,
+          category: email.result.category,
+          isReachable: email.result.isReachable,
+          syntaxStatus: email.result.syntaxStatus,
+          mxStatus: email.result.mxStatus,
+          smtpStatus: email.result.smtpStatus,
+          smtpResult: email.result.smtpResult,
+          catchAll: email.result.catchAll,
+          disposable: email.result.disposable,
+          roleAccount: email.result.roleAccount,
+          freeProvider: email.result.freeProvider,
+          reason: email.result.reason,
+          rawJson: asJson(email.result.rawJson),
+          source: "bulk"
         }))
       });
     }
@@ -60,7 +112,9 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
           bulkJobId: bulkJob.id,
           filename,
           originalRows: parsed.originalRows,
-          uniqueEmails: parsed.uniqueEmails.length
+          uniqueEmails: parsed.uniqueEmails.length,
+          reacherEmails: parsed.reacherEmails.length,
+          prefilteredEmails: parsed.prefilteredEmails.length
         }
       }
     });
@@ -76,7 +130,7 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
     throw error;
   }
 
-  if (parsed.uniqueEmails.length > 0) {
+  if (parsed.reacherEmails.length > 0) {
     try {
       await enqueueBulkJob(bulkJob.id);
     } catch {
@@ -95,7 +149,7 @@ export async function createBulkJobFromUpload(filename: string, parsed: ParsedUp
   return bulkJob;
 }
 
-export async function processBulkJob(bulkJobId: string) {
+export async function submitBulkJobToReacher(bulkJobId: string) {
   await prisma.bulkJob.update({
     where: { id: bulkJobId },
     data: {
@@ -116,17 +170,72 @@ export async function processBulkJob(bulkJobId: string) {
   }
 
   try {
-    await processWithReacherBulk(bulkJobId, emails, new ReacherClient());
+    console.log(`Submitting bulk job ${bulkJobId} to Reacher with ${emails.length} emails`);
+    await submitWithReacherBulk(bulkJobId, emails, new ReacherClient());
   } catch (error) {
     await failJob(bulkJobId, error);
     throw error;
   }
 }
 
-async function processWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[], client: ReacherClient) {
+export async function pollActiveReacherBulkJobs(client = new ReacherClient()) {
+  const jobs = await prisma.bulkJob.findMany({
+    where: {
+      status: "processing",
+      reacherJobId: { not: null }
+    },
+    orderBy: { startedAt: "asc" },
+    take: 25
+  });
+
+  if (jobs.length) {
+    console.log(`Polling ${jobs.length} active Reacher bulk job${jobs.length === 1 ? "" : "s"}`);
+  }
+
+  for (const job of jobs) {
+    try {
+      await pollReacherBulkJob(job.id, client);
+    } catch (error) {
+      await prisma.bulkJob.update({
+        where: { id: job.id },
+        data: {
+          errorMessage: `Polling failed and will retry: ${error instanceof Error ? error.message : String(error)}`
+        }
+      });
+    }
+  }
+}
+
+export async function pollReacherBulkJob(bulkJobId: string, client = new ReacherClient()) {
+  const job = await prisma.bulkJob.findUnique({ where: { id: bulkJobId } });
+  if (!job || job.status !== "processing" || !job.reacherJobId) return;
+
+  const progress = readBulkProgress(await client.getBulkProgress(job.reacherJobId), job.reacherEmails);
+  console.log(
+    `Reacher bulk job ${job.reacherJobId} for bulk job ${bulkJobId}: ${progress.rawStatus ?? progress.status} ${progress.processed}/${job.reacherEmails}`
+  );
+
+  await updateJobFromRemoteProgress(bulkJobId, progress, remoteProgressWarning(job, progress));
+
+  if (progress.status === "failed") {
+    await failJob(bulkJobId, `Reacher bulk job ${job.reacherJobId} ended with status ${progress.rawStatus ?? "failed"}`);
+    return;
+  }
+
+  if (progress.status !== "completed") return;
+
+  const emails = await prisma.bulkJobEmail.findMany({
+    where: { bulkJobId, status: { in: ["pending", "failed"] } },
+    orderBy: { createdAt: "asc" }
+  });
+
+  await saveCompletedReacherResults(bulkJobId, job.reacherJobId, emails, client);
+}
+
+async function submitWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[], client: ReacherClient) {
   const normalizedEmails = emails.map((email) => email.normalizedEmail);
-  const emailByNormalized = new Map(emails.map((email) => [email.normalizedEmail, email]));
   const { jobId } = await client.createBulkJob(normalizedEmails);
+  console.log(`Bulk job ${bulkJobId} submitted to Reacher as remote job ${jobId}`);
 
   await prisma.bulkJob.update({
     where: { id: bulkJobId },
@@ -135,20 +244,16 @@ async function processWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[],
       reacherJobId: jobId
     }
   });
+}
 
-  for (;;) {
-    const progress = readBulkProgress(await client.getBulkProgress(jobId), normalizedEmails.length);
-    await updateJobFromRemoteProgress(bulkJobId, progress);
-
-    if (progress.status === "completed") break;
-    if (progress.status === "failed") {
-      throw new Error(`Reacher bulk job ${jobId} ended with status ${progress.rawStatus ?? "failed"}`);
-    }
-
-    await sleep(env.REACHER_BULK_POLL_INTERVAL_MS);
-  }
-
-  const rawResults = await fetchAllBulkResults(client, jobId, normalizedEmails.length);
+async function saveCompletedReacherResults(
+  bulkJobId: string,
+  jobId: string,
+  emails: BulkJobEmail[],
+  client: ReacherClient
+) {
+  const emailByNormalized = new Map(emails.map((email) => [email.normalizedEmail, email]));
+  const rawResults = await fetchAllBulkResults(client, jobId, emails.length);
   const seen = new Set<string>();
 
   for (const raw of rawResults) {
@@ -279,6 +384,23 @@ async function storeCompletedEmail(
 }
 
 async function completeJobFromStoredResults(bulkJobId: string) {
+  const counts = await completedCountsForJob(bulkJobId);
+
+  await prisma.bulkJob.update({
+    where: { id: bulkJobId },
+    data: {
+      status: "completed",
+      processed: counts.total,
+      validCount: counts.valid,
+      invalidCount: counts.invalid,
+      riskyCount: counts.risky,
+      unknownCount: counts.unknown,
+      completedAt: new Date()
+    }
+  });
+}
+
+async function completedCountsForJob(bulkJobId: string) {
   const grouped = await prisma.bulkJobEmail.groupBy({
     by: ["category"],
     where: { bulkJobId, status: "completed" },
@@ -296,31 +418,39 @@ async function completeJobFromStoredResults(bulkJobId: string) {
     if (group.category) counts[group.category] = group._count._all;
   }
 
+  return {
+    ...counts,
+    total: counts.valid + counts.invalid + counts.risky + counts.unknown
+  };
+}
+
+async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBulkProgress, warningMessage: string | null) {
+  const storedCounts = await completedCountsForJob(bulkJobId);
+
   await prisma.bulkJob.update({
     where: { id: bulkJobId },
     data: {
-      status: "completed",
-      processed: counts.valid + counts.invalid + counts.risky + counts.unknown,
-      validCount: counts.valid,
-      invalidCount: counts.invalid,
-      riskyCount: counts.risky,
-      unknownCount: counts.unknown,
-      completedAt: new Date()
+      processed: storedCounts.total + progress.processed,
+      validCount: storedCounts.valid + progress.valid,
+      invalidCount: storedCounts.invalid + progress.invalid,
+      riskyCount: storedCounts.risky + progress.risky,
+      unknownCount: storedCounts.unknown + progress.unknown,
+      errorMessage: warningMessage
     }
   });
 }
 
-async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBulkProgress) {
-  await prisma.bulkJob.update({
-    where: { id: bulkJobId },
-    data: {
-      processed: progress.processed,
-      validCount: progress.valid,
-      invalidCount: progress.invalid,
-      riskyCount: progress.risky,
-      unknownCount: progress.unknown
-    }
-  });
+function remoteProgressWarning(
+  job: { startedAt: Date | null; reacherJobId: string | null; reacherEmails: number },
+  progress: RemoteBulkProgress
+) {
+  if (progress.status !== "running" || progress.processed > 0 || !job.startedAt) return null;
+  if (Date.now() - job.startedAt.getTime() < remoteZeroProgressWarningMs) return null;
+
+  return [
+    `Reacher job ${job.reacherJobId ?? "unknown"} is still running with 0/${job.reacherEmails} emails processed.`,
+    "The app submitted the job successfully, but the Reacher worker/RabbitMQ side is not consuming it yet."
+  ].join(" ");
 }
 
 async function failJob(bulkJobId: string, error: unknown) {
@@ -345,6 +475,21 @@ function countFieldForCategory(category: ClassifiedReacherResult["category"]) {
     default:
       return "unknownCount";
   }
+}
+
+function countsForPrefilteredEmails(parsed: PreparedBulkUpload) {
+  return parsed.prefilteredEmails.reduce(
+    (counts, email) => {
+      counts[email.result.category] += 1;
+      return counts;
+    },
+    {
+      valid: 0,
+      invalid: 0,
+      risky: 0,
+      unknown: 0
+    }
+  );
 }
 
 type RemoteBulkProgress = {

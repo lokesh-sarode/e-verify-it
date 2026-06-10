@@ -54,12 +54,17 @@ export function BulkJobDetailPage() {
     return [
       ["Total rows", progress.totalRows],
       ["Unique", progress.uniqueEmails],
+      ["To Reacher", progress.reacherEmails],
+      ["Prefiltered", progress.prefilteredEmails],
       ["Processed", progress.processed],
       ["Valid", progress.valid],
       ["Invalid", progress.invalid],
       ["Risky", progress.risky],
       ["Unknown", progress.unknown],
       ["Syntax invalid", progress.syntaxInvalid],
+      ["No MX", progress.noMxRows],
+      ["Disposable", progress.disposableRows],
+      ["MX unknown", progress.mxLookupFailedRows],
       ["Duplicates", progress.duplicatesRemoved],
       ["Elapsed", formatDuration(progress.elapsedSeconds)],
       ["ETA", formatDuration(progress.estimatedRemainingSeconds)],
@@ -84,7 +89,7 @@ export function BulkJobDetailPage() {
           <div>
             <h2 className="text-base font-semibold text-zinc-950">{job.filename}</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {progress.mode ?? "pending mode"}{progress.reacherJobId ? ` · Reacher job ${progress.reacherJobId}` : ""}
+              {progress.mode ?? "pending mode"}{progress.reacherJobId ? ` - Reacher job ${progress.reacherJobId}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2">

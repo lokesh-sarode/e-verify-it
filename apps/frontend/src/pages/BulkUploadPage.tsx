@@ -6,13 +6,14 @@ import { api, apiErrorMessage } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatusBadge } from "../components/StatusBadge";
-import type { AppConfig, BulkJob, BulkProgress } from "../types";
+import type { AppConfig, BulkJob, BulkPreview, BulkProgress } from "../types";
 
 export function BulkUploadPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<BulkPreview | null>(null);
   const [createdJob, setCreatedJob] = useState<BulkJob | null>(null);
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -34,24 +35,43 @@ export function BulkUploadPage() {
   const maxUploadMb = configQuery.data?.maxUploadMb ?? 20;
   const maxUploadBytes = maxUploadMb * 1024 * 1024;
 
-  const mutation = useMutation({
+  const previewMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("Select a file");
       const form = new FormData();
       form.append("file", file);
       setUploadProgress(0);
-      const response = await api.post<{ job: BulkJob }>("/bulk-jobs/upload", form, {
+      const response = await api.post<{ preview: BulkPreview }>("/bulk-jobs/preview", form, {
         headers: { "Content-Type": "multipart/form-data" },
         onUploadProgress(event) {
           if (!event.total) return;
           setUploadProgress(Math.round((event.loaded / event.total) * 100));
         }
       });
+      return response.data.preview;
+    },
+    onSuccess(nextPreview) {
+      setPreview(nextPreview);
+      setCreatedJob(null);
+      setUploadProgress(100);
+      setError(null);
+    },
+    onError(err) {
+      setError(apiErrorMessage(err));
+    }
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      if (!preview) throw new Error("Preview the file first");
+      const response = await api.post<{ job: BulkJob }>("/bulk-jobs/from-preview", {
+        previewId: preview.id
+      });
       return response.data.job;
     },
     onSuccess(job) {
       setCreatedJob(job);
-      setUploadProgress(100);
+      setPreview(null);
       setError(null);
     },
     onError(err) {
@@ -63,12 +83,14 @@ export function BulkUploadPage() {
     if (!nextFile) return;
     if (nextFile.size > maxUploadBytes) {
       setFile(null);
+      setPreview(null);
       setCreatedJob(null);
       setError(`File exceeds ${maxUploadMb} MB`);
       return;
     }
 
     setFile(nextFile);
+    setPreview(null);
     setCreatedJob(null);
     setError(null);
     setUploadProgress(0);
@@ -119,14 +141,27 @@ export function BulkUploadPage() {
 
         <button
           type="button"
-          disabled={!file || mutation.isPending}
-          onClick={() => mutation.mutate()}
+          disabled={!file || previewMutation.isPending || createMutation.isPending || Boolean(createdJob)}
+          onClick={() => {
+            if (preview) {
+              createMutation.mutate();
+              return;
+            }
+
+            previewMutation.mutate();
+          }}
           className="focus-ring mt-4 flex h-11 w-full items-center justify-center rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
         >
-          {mutation.isPending ? "Uploading" : "Create bulk job"}
+          {previewMutation.isPending
+            ? "Uploading"
+            : createMutation.isPending
+              ? "Creating job"
+              : preview
+                ? "Create bulk job"
+                : "Preview file"}
         </button>
 
-        {(mutation.isPending || uploadProgress > 0) ? (
+        {(previewMutation.isPending || uploadProgress > 0) ? (
           <div className="mt-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="font-medium text-zinc-700">Upload</span>
@@ -138,24 +173,35 @@ export function BulkUploadPage() {
       </section>
 
       <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
-        {createdJob ? (
+        {createdJob || preview ? (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-base font-semibold text-zinc-950">{createdJob.filename}</h2>
-                <p className="mt-1 text-sm text-zinc-500">{new Date(createdJob.createdAt).toLocaleString()}</p>
+                <h2 className="text-base font-semibold text-zinc-950">{createdJob?.filename ?? preview?.filename}</h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {new Date(createdJob?.createdAt ?? preview?.createdAt ?? Date.now()).toLocaleString()}
+                </p>
               </div>
-              <StatusBadge value={createdJob.status} />
+              {createdJob ? <StatusBadge value={createdJob.status} /> : (
+                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-800">
+                  preview
+                </span>
+              )}
             </div>
 
             <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {[
-                ["Original rows", createdJob.originalRows],
-                ["Empty rows", createdJob.emptyRows],
-                ["Duplicates", createdJob.duplicateRows],
-                ["Syntax invalid", createdJob.syntaxInvalidRows],
-                ["Unique to check", createdJob.uniqueEmails],
-                ["Processed", createdJob.processed]
+                ["Original rows", createdJob?.originalRows ?? preview?.originalRows],
+                ["Empty rows", createdJob?.emptyRows ?? preview?.emptyRows],
+                ["Duplicates", createdJob?.duplicateRows ?? preview?.duplicateRows],
+                ["Syntax invalid", createdJob?.syntaxInvalidRows ?? preview?.syntaxInvalidRows],
+                ["No MX", createdJob?.noMxRows ?? preview?.noMxRows],
+                ["Disposable", createdJob?.disposableRows ?? preview?.disposableRows],
+                ["MX unknown", createdJob?.mxLookupFailedRows ?? preview?.mxLookupFailedRows],
+                ["Unique emails", createdJob?.uniqueEmails ?? preview?.uniqueEmails],
+                ["Prefiltered", createdJob?.prefilteredEmails ?? preview?.prefilteredEmails],
+                ["To Reacher", createdJob?.reacherEmails ?? preview?.reacherEmails],
+                ["Processed", createdJob?.processed ?? 0]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
                   <dt className="text-xs font-medium uppercase tracking-normal text-zinc-500">{label}</dt>
@@ -164,7 +210,7 @@ export function BulkUploadPage() {
               ))}
             </dl>
 
-            {progressQuery.data ? (
+            {createdJob && progressQuery.data ? (
               <div className="space-y-2 rounded-md border border-zinc-200 bg-zinc-50 p-3">
                 <div className="flex justify-between text-sm">
                   <span className="font-medium text-zinc-700">Processing</span>
@@ -179,12 +225,14 @@ export function BulkUploadPage() {
               </div>
             ) : null}
 
-            <Link
-              to={`/bulk-jobs/${createdJob.id}`}
-              className="focus-ring inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
-            >
-              Open job
-            </Link>
+            {createdJob ? (
+              <Link
+                to={`/bulk-jobs/${createdJob.id}`}
+                className="focus-ring inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
+              >
+                Open job
+              </Link>
+            ) : null}
           </div>
         ) : (
           <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-center text-zinc-500">

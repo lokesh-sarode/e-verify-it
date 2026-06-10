@@ -10,7 +10,6 @@ x-app-env: &app-env
   COOKIE_SECRET: ${COOKIE_SECRET:-change_this_cookie_secret_24}
   REACHER_BASE_URL: ${REACHER_BASE_URL:-https://verify.example.com/v1}
   REACHER_API_KEY: ${REACHER_API_KEY:-}
-  REACHER_BULK_POLL_INTERVAL_MS: ${REACHER_BULK_POLL_INTERVAL_MS:-4000}
   REACHER_BULK_RESULTS_PAGE_SIZE: ${REACHER_BULK_RESULTS_PAGE_SIZE:-500}
   REACHER_TIMEOUT_MS: ${REACHER_TIMEOUT_MS:-15000}
   VERIFICATION_CACHE_DAYS: ${VERIFICATION_CACHE_DAYS:-7}
@@ -68,7 +67,7 @@ services:
     restart: unless-stopped
     environment: *app-env
     depends_on:
-      postgres:
+      api:
         condition: service_healthy
       redis:
         condition: service_healthy

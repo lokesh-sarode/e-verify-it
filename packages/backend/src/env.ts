@@ -8,6 +8,13 @@ const numberFromEnv = (fallback: number) =>
     return Number.isFinite(parsed) ? parsed : value;
   }, z.number().positive());
 
+const cappedNumberFromEnv = (fallback: number, max: number) =>
+  z.preprocess((value) => {
+    if (value === undefined || value === "") return fallback;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(parsed, max) : value;
+  }, z.number().positive());
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: z.string().default("postgresql://postgres:postgres@localhost:5432/email_verifier"),
@@ -18,9 +25,8 @@ const EnvSchema = z.object({
   COOKIE_SECRET: z.string().min(24).default("change_this_cookie_secret_24"),
   REACHER_BASE_URL: z.string().url().default("https://verify.example.com/v1"),
   REACHER_API_KEY: z.string().optional().default(""),
-  REACHER_BULK_POLL_INTERVAL_MS: numberFromEnv(4000),
   REACHER_BULK_RESULTS_PAGE_SIZE: numberFromEnv(500),
-  REACHER_TIMEOUT_MS: numberFromEnv(15000),
+  REACHER_TIMEOUT_MS: cappedNumberFromEnv(15000, 15000),
   VERIFICATION_CACHE_DAYS: numberFromEnv(7),
   MAX_UPLOAD_MB: numberFromEnv(20),
   FRONTEND_URL: z.string().url().default("http://localhost:5173"),
