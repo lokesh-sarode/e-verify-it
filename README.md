@@ -75,7 +75,7 @@ docker compose logs -f api
 docker compose logs -f worker
 ```
 
-Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening.
+Open `http://localhost` for local Docker Desktop. The API container runs Prisma migrations and seeds the admin user before it starts listening. The worker waits for the API health check so it starts after migrations are ready.
 
 Caddy serves HTTP for `APP_DOMAIN=:80`. For a real hostname, set `APP_DOMAIN=your-domain.com` and `FRONTEND_URL=https://your-domain.com`; Caddy will handle HTTPS.
 

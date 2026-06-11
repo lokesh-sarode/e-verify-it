@@ -42,7 +42,10 @@ export function BulkJobDetailPage() {
       return response.data;
     },
     enabled: Boolean(id),
-    refetchInterval: 6000
+    refetchInterval: () => {
+      const status = progressQuery.data?.status;
+      return status === "completed" || status === "failed" || status === "cancelled" ? false : 6000;
+    }
   });
 
   const progress = progressQuery.data;
@@ -84,7 +87,7 @@ export function BulkJobDetailPage() {
           <div>
             <h2 className="text-base font-semibold text-zinc-950">{job.filename}</h2>
             <p className="mt-1 text-sm text-zinc-500">
-              {progress.mode ?? "pending mode"}{progress.reacherJobId ? ` · Reacher job ${progress.reacherJobId}` : ""}
+              {progress.mode ?? "pending mode"}{progress.reacherJobId ? ` - Reacher job ${progress.reacherJobId}` : ""}
             </p>
           </div>
           <div className="flex items-center gap-2">

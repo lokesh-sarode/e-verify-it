@@ -20,8 +20,11 @@
     "tsx": "^4.19.4"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2",
+    "concurrently": "^9.2.1",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "shell-quote": "1.8.4"
   },
   "engines": {
     "node": ">=20"

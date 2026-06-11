@@ -7,7 +7,13 @@ export type BulkQueuePayload = { bulkJobId: string };
 let queue: ReturnType<typeof createBulkQueue> | null = null;
 
 export function createRedisConnection(): ConnectionOptions {
-  const url = new URL(env.REDIS_URL);
+  let url: URL;
+  try {
+    url = new URL(env.REDIS_URL);
+  } catch {
+    throw new Error("REDIS_URL must be a valid Redis URL, for example redis://localhost:6379");
+  }
+
   const db = url.pathname ? Number(url.pathname.replace("/", "")) : 0;
 
   return {

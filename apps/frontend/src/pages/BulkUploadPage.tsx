@@ -119,7 +119,7 @@ export function BulkUploadPage() {
 
         <button
           type="button"
-          disabled={!file || mutation.isPending}
+          disabled={!file || mutation.isPending || Boolean(createdJob)}
           onClick={() => mutation.mutate()}
           className="focus-ring mt-4 flex h-11 w-full items-center justify-center rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
         >

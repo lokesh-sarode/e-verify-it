@@ -10,7 +10,7 @@ type AdminSession = {
 
 declare module "fastify" {
   interface FastifyInstance {
-    authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void>;
+    authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void | FastifyReply>;
   }
 
   interface FastifyRequest {
@@ -31,8 +31,7 @@ export const authPlugin = fp(async (app) => {
     const token = request.cookies.auth_token ?? bearer;
 
     if (!token) {
-      reply.code(401).send({ message: "Authentication required" });
-      return;
+      return reply.code(401).send({ message: "Authentication required" });
     }
 
     try {
@@ -40,8 +39,7 @@ export const authPlugin = fp(async (app) => {
       const adminId = typeof decoded.sub === "string" ? decoded.sub : null;
 
       if (!adminId) {
-        reply.code(401).send({ message: "Invalid session" });
-        return;
+        return reply.code(401).send({ message: "Invalid session" });
       }
 
       const admin = await prisma.adminUser.findUnique({
@@ -50,14 +48,12 @@ export const authPlugin = fp(async (app) => {
       });
 
       if (!admin) {
-        reply.code(401).send({ message: "Invalid session" });
-        return;
+        return reply.code(401).send({ message: "Invalid session" });
       }
 
       request.admin = admin;
     } catch {
-      reply.code(401).send({ message: "Invalid session" });
+      return reply.code(401).send({ message: "Invalid session" });
     }
   });
 });
-

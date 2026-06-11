@@ -9,8 +9,11 @@ import {
   resultsToCsv,
   sanitizeFilename
 } from "@e-verify-it/backend";
+import { z } from "zod";
 
 const downloadKinds = new Set(["all", "valid", "invalid", "risky", "unknown", "smtp-result", "duplicates"]);
+const bulkStatuses = ["pending", "processing", "completed", "failed", "cancelled"] as const;
+const categories = ["valid", "invalid", "risky", "unknown"] as const;
 const allowedMimeTypes = new Set([
   "text/csv",
   "application/csv",
@@ -18,6 +21,17 @@ const allowedMimeTypes = new Set([
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   "application/octet-stream"
 ]);
+
+const ListBulkJobsQuerySchema = z.object({
+  status: z.enum(bulkStatuses).optional(),
+  take: z.coerce.number().int().min(1).max(100).default(50)
+});
+
+const ResultsQuerySchema = z.object({
+  category: z.enum(categories).optional(),
+  q: z.string().trim().max(320).optional(),
+  take: z.coerce.number().int().min(1).max(500).default(100)
+});
 
 export async function bulkRoutes(app: FastifyInstance) {
   app.post("/api/bulk-jobs/upload", { preHandler: app.authenticate }, async (request, reply) => {
@@ -83,13 +97,12 @@ export async function bulkRoutes(app: FastifyInstance) {
   });
 
   app.get("/api/bulk-jobs", { preHandler: app.authenticate }, async (request) => {
-    const query = request.query as { status?: string; take?: string };
-    const take = Math.min(Number(query.take ?? 50), 100);
+    const query = ListBulkJobsQuerySchema.parse(request.query);
 
     return prisma.bulkJob.findMany({
-      where: query.status ? { status: query.status as Prisma.EnumBulkJobStatusFilter["equals"] } : undefined,
+      where: query.status ? { status: query.status } : undefined,
       orderBy: { createdAt: "desc" },
-      take
+      take: query.take
     });
   });
 
@@ -134,7 +147,7 @@ export async function bulkRoutes(app: FastifyInstance) {
       unknown: job.unknownCount,
       syntaxInvalid: job.syntaxInvalidRows,
       duplicatesRemoved: job.duplicateRows,
-      progressPercentage: job.uniqueEmails ? Math.round((job.processed / job.uniqueEmails) * 100) : 100,
+      progressPercentage: progressPercentage(job.processed, job.uniqueEmails),
       startedAt: job.startedAt,
       completedAt: job.completedAt,
       elapsedSeconds: elapsedSeconds(job.startedAt, job.completedAt),
@@ -148,8 +161,7 @@ export async function bulkRoutes(app: FastifyInstance) {
 
   app.get("/api/bulk-jobs/:id/results", { preHandler: app.authenticate }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    const query = request.query as { category?: string; q?: string; take?: string };
-    const take = Math.min(Number(query.take ?? 100), 500);
+    const query = ResultsQuerySchema.parse(request.query);
 
     const job = await prisma.bulkJob.findUnique({ where: { id }, select: { id: true } });
     if (!job) {
@@ -160,11 +172,11 @@ export async function bulkRoutes(app: FastifyInstance) {
     return prisma.bulkJobEmail.findMany({
       where: {
         bulkJobId: id,
-        ...(query.category ? { category: query.category as Prisma.EnumVerificationCategoryNullableFilter["equals"] } : {}),
+        ...(query.category ? { category: query.category } : {}),
         ...(query.q ? { normalizedEmail: { contains: query.q.toLowerCase() } } : {})
       },
       orderBy: { createdAt: "asc" },
-      take
+      take: query.take
     });
   });
 
@@ -253,4 +265,9 @@ function estimatedRemainingSeconds(startedAt: Date | null, completedAt: Date | n
   if (!startedAt || completedAt || processed <= 0 || total <= processed) return 0;
   const rate = recordsPerSecond(startedAt, null, processed);
   return rate > 0 ? Math.max(0, Math.round((total - processed) / rate)) : 0;
+}
+
+function progressPercentage(processed: number, total: number) {
+  if (total <= 0) return 100;
+  return Math.max(0, Math.min(100, Math.round((processed / total) * 100)));
 }
