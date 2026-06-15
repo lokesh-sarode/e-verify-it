@@ -1,0 +1,9 @@
+nobounce.arkentechsolutions.com {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:8080
+}
+
+nobounce-api.arkentechsolutions.com {
+  encode gzip zstd
+  reverse_proxy 127.0.0.1:4000
+}

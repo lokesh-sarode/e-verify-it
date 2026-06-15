@@ -85,6 +85,72 @@ If Reacher is running on your Windows host machine and the app is running in Doc
 REACHER_BASE_URL=http://host.docker.internal:<reacher-port>/v1
 ```
 
+## Ubuntu VPS With Host Caddy And Split Subdomains
+
+Use this setup when Caddy is already installed as `caddy.service` on the VPS. In this mode, do not run the Docker `caddy` service from the default compose file. Host Caddy owns ports `80` and `443`, while Docker exposes the frontend/API only on localhost.
+
+Recommended public URLs:
+
+- Frontend: `https://nobounce.arkentechsolutions.com`
+- Backend API: `https://nobounce-api.arkentechsolutions.com`
+
+Create DNS `A` records for both subdomains pointing to the VPS public IP.
+
+On the VPS:
+
+```bash
+cp .env.vps.example .env
+```
+
+Edit `.env` and change at least:
+
+- `POSTGRES_PASSWORD`
+- `DATABASE_URL` so it uses the same Postgres password
+- `ADMIN_EMAIL`
+- `ADMIN_PASSWORD`
+- `JWT_SECRET`
+- `COOKIE_SECRET`
+- `REACHER_BASE_URL`
+- `REACHER_API_KEY` if your Reacher API requires it
+
+Keep these values for split subdomains:
+
+```env
+FRONTEND_URL=https://nobounce.arkentechsolutions.com
+VITE_API_BASE_URL=https://nobounce-api.arkentechsolutions.com/api
+FRONTEND_HOST_PORT=8080
+API_HOST_PORT=4000
+```
+
+Install the host Caddy config. If this VPS only serves this app, you can copy the example file. If Caddy already serves other sites, merge the two site blocks from `infra/caddy/Caddyfile.host-caddy.example` into the existing `/etc/caddy/Caddyfile`.
+
+```bash
+sudo cp infra/caddy/Caddyfile.host-caddy.example /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Start the app:
+
+```bash
+docker compose -f docker-compose.vps.yml up -d --build
+docker compose -f docker-compose.vps.yml logs -f api
+docker compose -f docker-compose.vps.yml logs -f worker
+```
+
+The VPS compose file binds only these localhost ports:
+
+- `127.0.0.1:8080` -> frontend container
+- `127.0.0.1:4000` -> API container
+
+Postgres and Redis are not published to the internet. Do not open ports `4000`, `5432`, `6379`, or `8080` in the firewall; only `80` and `443` need public access for Caddy.
+
+If you change `VITE_API_BASE_URL`, rebuild the frontend because Vite embeds that value at build time:
+
+```bash
+docker compose -f docker-compose.vps.yml up -d --build frontend
+```
+
 ## Reacher API Mapping
 
 Single email verification:

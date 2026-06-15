@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Download, RefreshCw, Search } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { api } from "../api/client";
+import { api, apiUrl } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ProgressBar } from "../components/ProgressBar";
 import { CategoryBadge, StatusBadge } from "../components/StatusBadge";
@@ -164,7 +164,7 @@ export function BulkJobDetailPage() {
             return (
               <a
                 key={kind}
-                href={`/api/bulk-jobs/${id}/download/${kind}`}
+                href={apiUrl(`/bulk-jobs/${id}/download/${kind}`)}
                 className={[
                   "focus-ring inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium",
                   isAvailable
