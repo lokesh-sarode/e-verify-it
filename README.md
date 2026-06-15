@@ -103,6 +103,17 @@ Bulk verification:
 
 The app stores the Reacher `job_id`, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
 
+## Verification Classification
+
+Single and bulk verification both use the same backend classifier after Reacher returns a result. Syntax and MX checks are treated as filters only; they do not prove that a mailbox exists.
+
+- `invalid`: invalid syntax, missing/unusable MX records, Reacher `is_reachable=invalid`, SMTP hard rejects, mailbox not found, mailbox disabled, unresolved mail server host, or other permanent 5xx mailbox failures.
+- `risky`: catch-all domains, disposable domains, role accounts, SMTP timeouts, temporary SMTP failures, greylisting, disconnected/headless/browser SMTP errors, or other inconclusive risk signals.
+- `valid`: `smtp.is_deliverable=true`, or Reacher reports `safe`/deliverable with no SMTP error.
+- `unknown`: Reacher reports `unknown`, DNS has a temporary lookup failure, SMTP data is missing, or the result does not include enough evidence for valid/invalid/risky.
+
+This means `syntax.is_valid_syntax=true` and `mx.accepts_mail=true` only allow the email to continue through verification. They are not counted as `valid` unless mailbox-level evidence is present.
+
 ## Reacher Worker Mode
 
 The `Reacher worker mode is unavailable` error means this app reached your Reacher API, but the Reacher `/v1/bulk` endpoint rejected the job because Reacher's queue/worker architecture is not enabled.

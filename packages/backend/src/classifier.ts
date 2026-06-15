@@ -20,11 +20,29 @@ const invalidSignals = [
   "rejected",
   "mailbox_not_found",
   "no_mailbox",
+  "no such user",
+  "user unknown",
+  "unknown user",
+  "invalid recipient",
+  "recipient address rejected",
+  "mailbox unavailable",
+  "mailbox disabled",
+  "account disabled",
+  "unreachable",
+  "not_reachable",
   "does_not_exist",
+  "does not exist",
+  "not deliverable",
   "domain_not_found",
+  "host_not_found",
+  "name does not resolve",
   "no_mx",
   "syntax_error",
-  "undeliverable"
+  "undeliverable",
+  "550",
+  "551",
+  "553",
+  "5.1.1"
 ];
 
 const riskySignals = [
@@ -35,13 +53,27 @@ const riskySignals = [
   "greylisted",
   "graylisted",
   "timeout",
+  "timed out",
   "temporary",
+  "temporarily",
   "risky",
   "role_account",
-  "disposable"
+  "disposable",
+  "headless",
+  "browser",
+  "webdriver",
+  "disconnected",
+  "connection reset",
+  "try again",
+  "451",
+  "452",
+  "4.2.0",
+  "4.2.1"
 ];
 
-const validSignals = ["safe", "deliverable", "reachable", "valid", "yes", "ok", "true"];
+const safeReachableSignals = ["safe", "deliverable", "reachable"];
+const unknownSignals = ["unknown", "inconclusive", "insufficient"];
+const temporaryDnsSignals = ["temporary failure in name resolution", "eai_again", "servfail"];
 
 function getValue(source: unknown, path: string): unknown {
   if (!source || typeof source !== "object") return undefined;
@@ -78,13 +110,28 @@ function asBoolean(value: unknown): boolean | null {
   return null;
 }
 
-function containsAny(values: Array<string | null>, signals: string[]) {
-  const haystack = values
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
+function normalizedText(value: unknown): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
+    return String(value).trim().toLowerCase();
+  }
 
-  return signals.some((signal) => haystack.includes(signal));
+  try {
+    return JSON.stringify(value).toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function hasAnySignal(value: string | null, signals: string[]) {
+  if (!value) return false;
+  return signals.some((signal) => value.includes(signal));
+}
+
+function hasRecords(value: unknown): boolean | null {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "string") return value.trim() ? true : null;
+  return null;
 }
 
 export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResult {
@@ -107,6 +154,7 @@ export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResu
     "is_valid_syntax"
   ]);
 
+  const mxRecordsRaw = firstValue(rawResult, ["mx.records", "mx.mx_records", "mxRecords"]);
   const mxRaw = firstValue(rawResult, [
     "mx.status",
     "mx.result",
@@ -123,8 +171,20 @@ export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResu
     "smtp"
   ]);
 
+  const smtpDeliverableRaw = firstValue(rawResult, [
+    "smtp.is_deliverable",
+    "smtp.deliverable",
+    "smtp.can_deliver",
+    "smtp.accepted",
+    "is_deliverable"
+  ]);
+  const smtpDisabledRaw = firstValue(rawResult, ["smtp.is_disabled", "smtp.disabled", "smtp.account_disabled"]);
+  const smtpErrorRaw = firstValue(rawResult, ["smtp.error", "smtp_error", "error.smtp"]);
+  const smtpErrorType = asString(firstValue(rawResult, ["smtp.error.type", "smtp.error.name", "smtp_error.type"]));
+  const smtpErrorMessage = normalizedText(firstValue(rawResult, ["smtp.error.message", "smtp.error", "smtp_error.message", "smtp_error"]));
+
   const smtpResult = asString(
-    firstValue(rawResult, ["smtp_result", "smtp.result", "smtp.response", "smtp.message", "reason"])
+    firstValue(rawResult, ["smtp_result", "smtp.result", "smtp.response", "smtp.message", "smtp.error.message", "reason"])
   );
 
   const catchAll = asBoolean(firstValue(rawResult, ["is_catch_all", "catch_all", "catchAll", "smtp.is_catch_all", "mx.is_catch_all"]));
@@ -133,24 +193,66 @@ export function classifyReacherResult(rawResult: unknown): ClassifiedReacherResu
   const freeProvider = asBoolean(firstValue(rawResult, ["is_free_email", "free_provider", "misc.is_free_email"]));
 
   const isReachable = asBoolean(isReachableRaw);
-  const syntaxStatus = asString(syntaxRaw);
-  const mxStatus = asString(mxRaw);
-  const smtpStatus = asString(smtpRaw);
+  const syntaxValid = asBoolean(syntaxRaw);
+  const mxAcceptsMail = asBoolean(mxRaw);
+  const mxRecordStatus = hasRecords(mxRecordsRaw);
+  const smtpDeliverable = asBoolean(smtpDeliverableRaw);
+  const smtpDisabled = asBoolean(smtpDisabledRaw);
+  const hasSmtpError = Boolean(smtpErrorRaw);
+  const reacherText = normalizedText(isReachableRaw);
+  const smtpText = [
+    normalizedText(smtpRaw),
+    normalizedText(smtpResult),
+    smtpErrorType?.toLowerCase() ?? null,
+    smtpErrorMessage
+  ].filter(Boolean).join(" ");
 
-  const signals = [asString(isReachableRaw), syntaxStatus, mxStatus, smtpStatus, smtpResult];
+  const syntaxStatus = syntaxValid === null ? asString(syntaxRaw) : String(syntaxValid);
+  const mxStatus = mxAcceptsMail === null ? asString(mxRaw) : String(mxAcceptsMail);
+  const smtpStatus = smtpErrorType ? `error:${smtpErrorType}` : asString(smtpRaw);
+
+  const hardInvalid = hasAnySignal(reacherText, invalidSignals) || hasAnySignal(smtpText, invalidSignals);
+  const risky = hasAnySignal(reacherText, riskySignals) || hasAnySignal(smtpText, riskySignals);
+  const temporaryDnsIssue = hasAnySignal(smtpText, temporaryDnsSignals);
+  const reacherSafe = hasAnySignal(reacherText, safeReachableSignals);
+  const reacherUnknown = hasAnySignal(reacherText, unknownSignals);
 
   let category: VerificationCategory = "unknown";
   let reason = "No conclusive Reacher result";
 
-  if (asBoolean(syntaxRaw) === false || containsAny(signals, invalidSignals)) {
+  if (syntaxValid === false) {
     category = "invalid";
-    reason = "Reacher reported invalid syntax, domain, SMTP, or mailbox";
-  } else if (catchAll || disposable || roleAccount || containsAny(signals, riskySignals)) {
+    reason = "Invalid email syntax";
+  } else if (mxAcceptsMail === false || mxRecordStatus === false) {
+    category = "invalid";
+    reason = "Domain does not have usable MX records";
+  } else if (smtpDisabled === true) {
+    category = "invalid";
+    reason = "SMTP reported the mailbox as disabled";
+  } else if (smtpDeliverable === false && !hasSmtpError) {
+    category = "invalid";
+    reason = "SMTP reported the mailbox as not deliverable";
+  } else if (isReachable === false || hardInvalid) {
+    category = "invalid";
+    reason = "Reacher or SMTP reported the mailbox as invalid";
+  } else if (catchAll || disposable || roleAccount) {
     category = "risky";
-    reason = "Mailbox appears risky or inconclusive despite a reachable domain";
-  } else if (isReachable === true || containsAny(signals, validSignals)) {
+    reason = "Mailbox is deliverable only with risk flags";
+  } else if (temporaryDnsIssue) {
+    category = "unknown";
+    reason = "DNS lookup had a temporary failure";
+  } else if (risky) {
+    category = "risky";
+    reason = "SMTP verification returned a temporary or inconclusive risk signal";
+  } else if (smtpDeliverable === true) {
     category = "valid";
-    reason = "Reacher reported the mailbox as reachable or deliverable";
+    reason = "SMTP reported the mailbox as deliverable";
+  } else if (reacherSafe && !hasSmtpError) {
+    category = "valid";
+    reason = "Reacher reported the mailbox as safe with no SMTP error";
+  } else if (reacherUnknown || hasSmtpError) {
+    category = "unknown";
+    reason = hasSmtpError ? "SMTP verification did not produce a definitive mailbox result" : "Reacher reported an unknown result";
   }
 
   return {
