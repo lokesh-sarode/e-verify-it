@@ -1,12 +1,15 @@
-import { Prisma, type BulkJobEmail } from "@prisma/client";
+import { Prisma, type BulkJobEmail, type VerificationResult } from "@prisma/client";
+import { findCachedVerificationResults } from "./cache";
 import { classifyReacherResult, type ClassifiedReacherResult } from "./classifier";
 import { env } from "./env";
+import { createEmailPrefilter } from "./prefilter";
 import { enqueueBulkJob } from "./queue";
 import { prisma } from "./prisma";
 import { ReacherClient } from "./reacher";
 import type { ParsedUpload } from "./uploadParser";
 
 const createManyBatchSize = 1000;
+const preFilterBatchSize = 50;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -116,14 +119,111 @@ export async function processBulkJob(bulkJobId: string) {
   }
 
   try {
-    await processWithReacherBulk(bulkJobId, emails, new ReacherClient());
+    const uncachedEmails = await applyCachedResults(bulkJobId, emails);
+    const emailsForReacher = await applyLocalPreFilters(bulkJobId, uncachedEmails);
+
+    if (!emailsForReacher.length) {
+      await completeJobFromStoredResults(bulkJobId);
+      return;
+    }
+
+    await processWithReacherBulk(bulkJobId, emailsForReacher, new ReacherClient());
   } catch (error) {
     await failJob(bulkJobId, error);
     throw error;
   }
 }
 
+async function applyCachedResults(bulkJobId: string, emails: BulkJobEmail[]) {
+  const cachedByEmail = await findCachedVerificationResults(emails.map((email) => email.normalizedEmail));
+  if (!cachedByEmail.size) return emails;
+
+  const remaining: BulkJobEmail[] = [];
+  let applied = 0;
+
+  for (const email of emails) {
+    const cached = cachedByEmail.get(email.normalizedEmail);
+
+    if (!cached) {
+      remaining.push(email);
+      continue;
+    }
+
+    await storeCompletedEmail(bulkJobId, email.normalizedEmail, classifiedFromCachedResult(cached), false, false);
+    applied += 1;
+  }
+
+  if (applied > 0) await refreshJobCounts(bulkJobId);
+  return remaining;
+}
+
+async function applyLocalPreFilters(bulkJobId: string, emails: BulkJobEmail[]) {
+  const remaining: BulkJobEmail[] = [];
+  const prefilterEmail = createEmailPrefilter();
+  let applied = 0;
+
+  for (const batch of chunks(emails, preFilterBatchSize)) {
+    const prefilterResults = await Promise.all(
+      batch.map(async (email) => ({
+        email,
+        result: await prefilterEmail(email.normalizedEmail)
+      }))
+    );
+
+    for (const { email, result } of prefilterResults) {
+      if (!result) {
+        remaining.push(email);
+        continue;
+      }
+
+      await storeCompletedEmail(bulkJobId, email.normalizedEmail, result, true, false);
+      applied += 1;
+    }
+  }
+
+  if (applied > 0) await refreshJobCounts(bulkJobId);
+  return remaining;
+}
+
+function classifiedFromCachedResult(result: VerificationResult): ClassifiedReacherResult {
+  return {
+    category: result.category,
+    isReachable: result.isReachable,
+    syntaxStatus: result.syntaxStatus,
+    mxStatus: result.mxStatus,
+    smtpStatus: result.smtpStatus,
+    smtpResult: result.smtpResult,
+    catchAll: result.catchAll,
+    disposable: result.disposable,
+    roleAccount: result.roleAccount,
+    freeProvider: result.freeProvider,
+    reason: result.reason ?? "Reused cached verification result",
+    rawJson: result.rawJson ?? {}
+  };
+}
+
 async function processWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[], client: ReacherClient) {
+  const reacherJobIds: string[] = [];
+
+  for (const emailChunk of chunks(emails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE)) {
+    const jobId = await processReacherBulkChunk(bulkJobId, emailChunk, client);
+    reacherJobIds.push(jobId);
+
+    await prisma.bulkJob.update({
+      where: { id: bulkJobId },
+      data: {
+        mode: "reacher_bulk",
+        reacherJobId: reacherJobIds.join(",")
+      }
+    });
+
+    await refreshJobCounts(bulkJobId);
+  }
+
+  await completeJobFromStoredResults(bulkJobId);
+}
+
+async function processReacherBulkChunk(bulkJobId: string, emails: BulkJobEmail[], client: ReacherClient) {
   const normalizedEmails = emails.map((email) => email.normalizedEmail);
   const emailByNormalized = new Map(emails.map((email) => [email.normalizedEmail, email]));
   const { jobId } = await client.createBulkJob(normalizedEmails);
@@ -184,7 +284,7 @@ async function processWithReacherBulk(bulkJobId: string, emails: BulkJobEmail[],
     );
   }
 
-  await completeJobFromStoredResults(bulkJobId);
+  return jobId;
 }
 
 async function fetchAllBulkResults(client: ReacherClient, jobId: string, expectedTotal: number) {
@@ -279,6 +379,38 @@ async function storeCompletedEmail(
 }
 
 async function completeJobFromStoredResults(bulkJobId: string) {
+  const counts = await getStoredCategoryCounts(bulkJobId);
+
+  await prisma.bulkJob.update({
+    where: { id: bulkJobId },
+    data: {
+      status: "completed",
+      processed: counts.processed,
+      validCount: counts.valid,
+      invalidCount: counts.invalid,
+      riskyCount: counts.risky,
+      unknownCount: counts.unknown,
+      completedAt: new Date()
+    }
+  });
+}
+
+async function refreshJobCounts(bulkJobId: string) {
+  const counts = await getStoredCategoryCounts(bulkJobId);
+
+  await prisma.bulkJob.update({
+    where: { id: bulkJobId },
+    data: {
+      processed: counts.processed,
+      validCount: counts.valid,
+      invalidCount: counts.invalid,
+      riskyCount: counts.risky,
+      unknownCount: counts.unknown
+    }
+  });
+}
+
+async function getStoredCategoryCounts(bulkJobId: string) {
   const grouped = await prisma.bulkJobEmail.groupBy({
     by: ["category"],
     where: { bulkJobId, status: "completed" },
@@ -296,29 +428,23 @@ async function completeJobFromStoredResults(bulkJobId: string) {
     if (group.category) counts[group.category] = group._count._all;
   }
 
-  await prisma.bulkJob.update({
-    where: { id: bulkJobId },
-    data: {
-      status: "completed",
-      processed: counts.valid + counts.invalid + counts.risky + counts.unknown,
-      validCount: counts.valid,
-      invalidCount: counts.invalid,
-      riskyCount: counts.risky,
-      unknownCount: counts.unknown,
-      completedAt: new Date()
-    }
-  });
+  return {
+    ...counts,
+    processed: counts.valid + counts.invalid + counts.risky + counts.unknown
+  };
 }
 
 async function updateJobFromRemoteProgress(bulkJobId: string, progress: RemoteBulkProgress) {
+  const storedCounts = await getStoredCategoryCounts(bulkJobId);
+
   await prisma.bulkJob.update({
     where: { id: bulkJobId },
     data: {
-      processed: progress.processed,
-      validCount: progress.valid,
-      invalidCount: progress.invalid,
-      riskyCount: progress.risky,
-      unknownCount: progress.unknown
+      processed: storedCounts.processed + progress.processed,
+      validCount: storedCounts.valid + progress.valid,
+      invalidCount: storedCounts.invalid + progress.invalid,
+      riskyCount: storedCounts.risky + progress.risky,
+      unknownCount: storedCounts.unknown + progress.unknown
     }
   });
 }

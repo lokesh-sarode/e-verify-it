@@ -2,11 +2,11 @@
 
 Internal admin-only email verification dashboard powered by Reacher v1 APIs.
 
-The app supports admin login, single email verification with `POST /v1/check_email`, bulk jobs with `POST /v1/bulk`, CSV/XLSX uploads, syntax filtering, deduplication, live progress, timing counters, categorized CSV downloads, PostgreSQL persistence, Redis/BullMQ job orchestration, and Docker/Caddy deployment.
+The app supports admin login, single email verification with `POST /v1/check_email`, bulk jobs with `POST /v1/bulk`, CSV/XLSX uploads, syntax filtering, MX/disposable/role pre-filtering, deduplication, cached verification reuse, chunked bulk submission, live progress, timing counters, categorized CSV downloads, PostgreSQL persistence, Redis/BullMQ job orchestration, and Docker/Caddy deployment.
 
 This project assumes your Reacher API already has worker/bulk processing enabled. The app does not need to run RabbitMQ or Reacher worker containers itself.
 
-The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, and a 15 second timeout for each outbound Reacher request by default.
+The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, a 15 second timeout for each outbound Reacher HTTP request, a 60 day verification cache, and 1,000-email Reacher bulk submission chunks by default.
 
 ## Stack
 
@@ -163,15 +163,15 @@ Bulk verification:
 
 - App route: `POST /api/bulk-jobs/upload`
 - Reacher route: `POST {REACHER_BASE_URL}/bulk`
-- Reacher body: `{ "input": ["a@example.com", "b@example.com"] }`
+- Reacher body per chunk: `{ "input": ["a@example.com", "b@example.com"] }`
 - Progress: `GET {REACHER_BASE_URL}/bulk/{job_id}`
 - Results: `GET {REACHER_BASE_URL}/bulk/{job_id}/results?limit=500&offset=0`
 
-The app stores the Reacher `job_id`, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
+Before calling Reacher, the worker reuses cached results newer than `VERIFICATION_CACHE_DAYS`, rejects domains without MX records, marks disposable/role emails as risky, and only submits the remaining emails. Large jobs are split into `REACHER_BULK_SUBMIT_CHUNK_SIZE` chunks. The app stores the Reacher `job_id` values, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
 
 ## Verification Classification
 
-Single and bulk verification both use the same backend classifier after Reacher returns a result. Syntax and MX checks are treated as filters only; they do not prove that a mailbox exists.
+Single and bulk verification both use the same backend classifier. Local pre-filter decisions are stored in the same result format as Reacher responses. Syntax and MX checks are treated as filters only; they do not prove that a mailbox exists.
 
 - `invalid`: invalid syntax, missing/unusable MX records, Reacher `is_reachable=invalid`, SMTP hard rejects, mailbox not found, mailbox disabled, unresolved mail server host, or other permanent 5xx mailbox failures.
 - `risky`: catch-all domains, disposable domains, role accounts, SMTP timeouts, temporary SMTP failures, greylisting, disconnected/headless/browser SMTP errors, or other inconclusive risk signals.
@@ -179,6 +179,13 @@ Single and bulk verification both use the same backend classifier after Reacher 
 - `unknown`: Reacher reports `unknown`, DNS has a temporary lookup failure, SMTP data is missing, or the result does not include enough evidence for valid/invalid/risky.
 
 This means `syntax.is_valid_syntax=true` and `mx.accepts_mail=true` only allow the email to continue through verification. They are not counted as `valid` unless mailbox-level evidence is present.
+
+## Performance Controls
+
+- `VERIFICATION_CACHE_DAYS=60`: single and bulk verification reuse recent stored results instead of calling Reacher again.
+- `REACHER_BULK_SUBMIT_CHUNK_SIZE=1000`: bulk jobs are submitted to Reacher in smaller sequential chunks for steadier progress and recovery.
+- `DNS_LOOKUP_TIMEOUT_MS=5000`: local MX lookups fail fast enough to avoid blocking the worker for a long time.
+- SMTP outbound IP/proxy rotation must be configured on the Reacher side, because Reacher is the service that opens SMTP connections. The app's `REACHER_BASE_URL` HTTP call does not control SMTP source IP. On a 2 vCPU / 8 GB VPS, start with the current 5 workers x 5 concurrency only if result quality stays stable; for multiple outbound IPs, prefer a small pool of 2-4 clean SMTP-capable egress IPs or SOCKS5 proxies rather than cheap rotating proxy lists.
 
 ## Reacher Worker Mode
 
@@ -267,7 +274,7 @@ Accepted email columns:
 - `email_address`
 - `Email Address`
 
-Rows are normalized, lowercased, syntax-validated, and deduplicated before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher. Duplicate rows can be downloaded from the bulk job page as `duplicates.csv`, even if Reacher worker mode fails later.
+Rows are normalized, lowercased, syntax-validated, and deduplicated before any Reacher call. Duplicate and syntax-invalid rows are tracked separately and are not sent to Reacher. During worker processing, cached results, no-MX domains, disposable domains, and role accounts are completed locally before the Reacher bulk chunk is created. Duplicate rows can be downloaded from the bulk job page as `duplicates.csv`, even if Reacher worker mode fails later.
 
 ## Progress
 
@@ -275,7 +282,7 @@ Upload page:
 
 - Shows upload percentage while the file is being sent
 - Shows parsed row counts after job creation
-- Polls the created bulk job and shows processing progress, elapsed time, and ETA
+- Polls the created bulk job and shows processing progress, elapsed time, and ETA. Processed counts include cached rows, local pre-filter rows, and current Reacher chunk progress.
 
 Bulk job detail page:
 

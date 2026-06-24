@@ -2,9 +2,10 @@ import type { FastifyInstance } from "fastify";
 import { Prisma } from "@prisma/client";
 import {
   classifyReacherResult,
-  env,
+  findCachedVerificationResult,
   isValidEmailSyntax,
   normalizeEmail,
+  prefilterEmail,
   prisma,
   ReacherClient
 } from "@e-verify-it/backend";
@@ -27,6 +28,40 @@ export async function singleRoutes(app: FastifyInstance) {
     const cached = await findCachedSingleResult(normalizedEmail);
     if (cached) {
       reply.send({ result: cached, cached: true });
+      return;
+    }
+
+    const prefiltered = await prefilterEmail(normalizedEmail);
+    if (prefiltered) {
+      const result = await prisma.verificationResult.create({
+        data: {
+          email: body.email.trim(),
+          normalizedEmail,
+          category: prefiltered.category,
+          isReachable: prefiltered.isReachable,
+          syntaxStatus: prefiltered.syntaxStatus,
+          mxStatus: prefiltered.mxStatus,
+          smtpStatus: prefiltered.smtpStatus,
+          smtpResult: prefiltered.smtpResult,
+          catchAll: prefiltered.catchAll,
+          disposable: prefiltered.disposable,
+          roleAccount: prefiltered.roleAccount,
+          freeProvider: prefiltered.freeProvider,
+          reason: prefiltered.reason,
+          rawJson: (prefiltered.rawJson ?? {}) as Prisma.InputJsonValue,
+          source: "single"
+        }
+      });
+
+      await prisma.auditLog.create({
+        data: {
+          adminId: request.admin?.id,
+          action: "single_verification",
+          meta: { email: normalizedEmail, category: result.category, source: "pre_filter" }
+        }
+      });
+
+      reply.send({ result, cached: false });
       return;
     }
 
@@ -74,14 +109,5 @@ export async function singleRoutes(app: FastifyInstance) {
 }
 
 async function findCachedSingleResult(normalizedEmail: string) {
-  if (env.VERIFICATION_CACHE_DAYS <= 0) return null;
-
-  const since = new Date(Date.now() - env.VERIFICATION_CACHE_DAYS * 24 * 60 * 60 * 1000);
-  return prisma.verificationResult.findFirst({
-    where: {
-      normalizedEmail,
-      createdAt: { gte: since }
-    },
-    orderBy: { createdAt: "desc" }
-  });
+  return findCachedVerificationResult(normalizedEmail);
 }
