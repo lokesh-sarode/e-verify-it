@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reacher
+      POSTGRES_PASSWORD: ${REACHER_POSTGRES_PASSWORD}
+      POSTGRES_DB: reacher
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U reacher -d reacher"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:4.0-management
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: reacher
+      RABBITMQ_DEFAULT_PASS: ${REACHER_RABBITMQ_PASSWORD}
+    ports:
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping && rabbitmq-diagnostics -q check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  single-api:
+    image: reacherhq/backend:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8081:8081"
+    environment:
+      RCH__BACKEND_NAME: single-api
+      RCH__HTTP_HOST: "0.0.0.0"
+      RCH__HTTP_PORT: "8081"
+      RCH__HELLO_NAME: "verify.arkentechsolutions.com"
+      RCH__FROM_EMAIL: "verify@arkentechsolutions.com"
+      RCH__WORKER__ENABLE: "false"
+      RUST_LOG: "reacher=info"
+
+  bulk-api:
+    image: reacherhq/backend:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      RCH__BACKEND_NAME: bulk-api
+      RCH__HTTP_HOST: "0.0.0.0"
+      RCH__HTTP_PORT: "8080"
+      RCH__HELLO_NAME: "verify.arkentechsolutions.com"
+      RCH__FROM_EMAIL: "verify@arkentechsolutions.com"
+      RCH__WORKER__ENABLE: "true"
+      RCH__WORKER__RABBITMQ__URL: "amqp://reacher:${REACHER_RABBITMQ_PASSWORD}@rabbitmq:5672"
+      RCH__WORKER__RABBITMQ__CONCURRENCY: "5"
+      RCH__STORAGE__POSTGRES__DB_URL: "postgresql://reacher:${REACHER_POSTGRES_PASSWORD}@postgres:5432/reacher"
+      RUST_LOG: "reacher=info"
+
+  worker:
+    image: reacherhq/backend:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      RCH__BACKEND_NAME: worker-1
+      RCH__HELLO_NAME: "verify.arkentechsolutions.com"
+      RCH__FROM_EMAIL: "verify@arkentechsolutions.com"
+      RCH__WORKER__ENABLE: "true"
+      RCH__WORKER__RABBITMQ__URL: "amqp://reacher:${REACHER_RABBITMQ_PASSWORD}@rabbitmq:5672"
+      RCH__WORKER__RABBITMQ__CONCURRENCY: "5"
+      RCH__STORAGE__POSTGRES__DB_URL: "postgresql://reacher:${REACHER_POSTGRES_PASSWORD}@postgres:5432/reacher"
+      RUST_LOG: "reacher=info"
+
+volumes:
+  postgres_data:
+  rabbitmq_data:

@@ -1,0 +1,46 @@
+verify.arkentechsolutions.com {
+        header {
+                Access-Control-Allow-Origin "https://arkenmailtool.netlify.app, https://nobounce.arkentechsolutions.com"
+                Access-Control-Allow-Methods "GET, POST, OPTIONS"
+                Access-Control-Allow-Headers "*"
+        }
+
+        @options {
+                method OPTIONS
+        }
+
+        respond @options 204
+
+        # Single email verification
+        @single path /v1/check_email*
+        reverse_proxy @single 127.0.0.1:8081
+
+        # Bulk verification and related endpoints
+        @bulk path /v1/bulk
+        reverse_proxy @bulk 127.0.0.1:8080
+
+        # Optional: bulk job status/results endpoints
+        @bulkJobs path /v1/jobs* /v1/bulk/*
+        reverse_proxy @bulkJobs 127.0.0.1:8080
+}
+
+#verify.arkentechsolutions.com {
+#       header {
+#               Access-Control-Allow-Origin "https://arkenmailtool.netlify.app, https://nobounce.arkentechsolutions.com"
+#               Access-Control-Allow-Methods "GET, POST, OPTIONS"
+#               Access-Control-Allow-Headers "*"
+#       }
+#       @options {
+#               method OPTIONS
+#       }
+#       respond @options 204
+#       reverse_proxy localhost:8080
+#}
+
+nobounce.arkentechsolutions.com {
+        reverse_proxy 127.0.0.1:9100
+}
+
+nobounce-api.arkentechsolutions.com {
+        reverse_proxy 127.0.0.1:4000
+}
