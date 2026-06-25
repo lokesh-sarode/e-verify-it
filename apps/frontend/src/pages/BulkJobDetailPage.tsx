@@ -191,7 +191,7 @@ export function BulkJobDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 border-b border-zinc-200 p-4">
-          <div className="basis-full rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-900">
+          <div className="basis-full rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
             Downloads include completed rows only. Current downloadable result rows:{" "}
             <span className="font-semibold">{progress.downloadableResults}</span>
             {progress.status !== "completed" ? " while this job continues processing." : "."}

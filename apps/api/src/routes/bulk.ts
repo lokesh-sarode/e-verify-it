@@ -135,13 +135,20 @@ export async function bulkRoutes(app: FastifyInstance) {
       return;
     }
 
+    const downloadableResults = await prisma.bulkJobEmail.count({
+      where: {
+        bulkJobId: id,
+        status: "completed"
+      }
+    });
+
     return {
       jobId: job.id,
       status: job.status,
       batchSize: env.REACHER_BULK_SUBMIT_CHUNK_SIZE,
       totalBatches: batchCount(job.uniqueEmails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE),
-      completedBatches: completedBatchCount(job.processed, job.uniqueEmails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE),
-      downloadableResults: job.processed,
+      completedBatches: completedBatchCount(downloadableResults, job.uniqueEmails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE),
+      downloadableResults,
       totalRows: job.originalRows,
       uniqueEmails: job.uniqueEmails,
       processed: job.processed,
@@ -281,7 +288,7 @@ function batchCount(total: number, batchSize: number) {
   return total > 0 ? Math.ceil(total / batchSize) : 0;
 }
 
-function completedBatchCount(processed: number, total: number, batchSize: number) {
-  if (total > 0 && processed >= total) return batchCount(total, batchSize);
-  return processed > 0 ? Math.floor(processed / batchSize) : 0;
+function completedBatchCount(downloadableResults: number, total: number, batchSize: number) {
+  if (total > 0 && downloadableResults >= total) return batchCount(total, batchSize);
+  return downloadableResults > 0 ? Math.floor(downloadableResults / batchSize) : 0;
 }
