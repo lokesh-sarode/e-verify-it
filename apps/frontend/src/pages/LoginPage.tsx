@@ -3,8 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom";
 import { apiErrorMessage } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { useAuth } from "../context/AuthContext";
-
-const arkenLogo = "https://arkentechsolutions.com/wp-content/uploads/2023/04/Arken-Logo_fevicon-150x150.png";
+import nobounceLogo from '../assets/NoBounce-Logo.png';
 
 export function LoginPage() {
   const { admin, login } = useAuth();
@@ -36,10 +35,10 @@ export function LoginPage() {
       <form onSubmit={handleSubmit} className="app-panel w-full max-w-md p-6">
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-brand-100 bg-white p-1 shadow-sm">
-            <img src={arkenLogo} alt="Arken Tech Solutions" className="h-full w-full rounded-md object-contain" />
+            <img src={nobounceLogo} alt="NoBounce Logo" className="h-full w-full rounded-md object-contain" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-zinc-950">E-Verify It</h1>
+            <h1 className="text-xl font-semibold text-zinc-950">No<span style={{ color: '#91080b' }}>Bounce</span></h1>
             <p className="text-sm text-zinc-500">Admin login</p>
           </div>
         </div>

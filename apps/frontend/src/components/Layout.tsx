@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import nobounceLogo from '../assets/NoBounce-Logo.png';
 
 const navItems = [
   { to: "/dashboard", label: "Dashboard", icon: BarChart3 },
@@ -22,8 +23,6 @@ const pageTitles: Record<string, string> = {
   "/bulk-upload": "Bulk Upload",
   "/bulk-jobs": "Bulk Jobs"
 };
-
-const arkenLogo = "https://arkentechsolutions.com/wp-content/uploads/2023/04/Arken-Logo_fevicon-150x150.png";
 
 export function Layout() {
   const { admin, logout } = useAuth();
@@ -40,11 +39,11 @@ export function Layout() {
     <div className="min-h-screen bg-[#f7f7f8]">
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-zinc-200/80 bg-white lg:block">
         <div className="flex h-16 items-center gap-3 border-b border-zinc-200/80 px-5">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-brand-100 bg-white p-1 shadow-sm">
-            <img src={arkenLogo} alt="Arken Tech Solutions" className="h-full w-full rounded-md object-contain" />
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-brand-100 bg-white p-1 shadow-sm">
+            <img src={nobounceLogo} alt="NoBounce Logo" className="h-full w-full rounded-md object-contain" />
           </div>
           <div>
-            <div className="text-base font-semibold text-zinc-950">E-Verify It</div>
+            <div className="text-base font-semibold text-zinc-950">No<span style={{ color: '#91080b' }}>Bounce</span></div>
             <div className="text-xs text-zinc-500">Admin console</div>
           </div>
         </div>
