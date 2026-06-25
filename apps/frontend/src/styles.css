@@ -11,7 +11,7 @@
 body {
   margin: 0;
   min-width: 320px;
-  background: #f6f7f9;
+  background: #f7f7f8;
   color: #111827;
 }
 
@@ -22,6 +22,51 @@ select {
 }
 
 .focus-ring {
-  @apply focus:outline-none focus:ring-2 focus:ring-teal-500 focus:ring-offset-2;
+  @apply focus:outline-none focus:ring-2 focus:ring-brand-600 focus:ring-offset-2;
 }
 
+@layer components {
+  .app-panel {
+    @apply rounded-lg border border-zinc-200/80 bg-white shadow-panel;
+  }
+
+  .app-card {
+    @apply rounded-lg border border-zinc-200/80 bg-white shadow-soft transition duration-200 ease-out;
+  }
+
+  .app-card-hover {
+    @apply hover:-translate-y-0.5 hover:border-brand-100 hover:shadow-panel;
+  }
+
+  .btn {
+    @apply focus-ring inline-flex h-10 items-center justify-center gap-2 rounded-md border px-4 text-sm font-semibold transition duration-200 ease-out active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-primary {
+    @apply border-brand-600 bg-brand-600 text-white shadow-sm hover:bg-brand-700 hover:shadow-md;
+  }
+
+  .btn-secondary {
+    @apply border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50 hover:text-zinc-950;
+  }
+
+  .btn-muted {
+    @apply border-zinc-200 bg-zinc-100 text-zinc-500;
+  }
+
+  .input {
+    @apply focus-ring h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-900 shadow-sm transition duration-200 placeholder:text-zinc-400 hover:border-zinc-400;
+  }
+
+  .filter-button {
+    @apply focus-ring h-9 rounded-md border px-3 text-sm font-semibold capitalize transition duration-200 active:scale-[0.98];
+  }
+
+  .table-head {
+    @apply bg-zinc-50/90 text-xs uppercase tracking-normal text-zinc-500;
+  }
+
+  .table-row {
+    @apply transition duration-150 hover:bg-brand-50/40;
+  }
+}

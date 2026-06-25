@@ -1,9 +1,10 @@
-import { ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { apiErrorMessage } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { useAuth } from "../context/AuthContext";
+
+const arkenLogo = "https://arkentechsolutions.com/wp-content/uploads/2023/04/Arken-Logo_fevicon-150x150.png";
 
 export function LoginPage() {
   const { admin, login } = useAuth();
@@ -31,11 +32,11 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f6f7f9] px-4">
-      <form onSubmit={handleSubmit} className="w-full max-w-md rounded-lg border border-zinc-200 bg-white p-6 shadow-soft">
+    <div className="flex min-h-screen items-center justify-center bg-[#f7f7f8] px-4">
+      <form onSubmit={handleSubmit} className="app-panel w-full max-w-md p-6">
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-teal-600 text-white">
-            <ShieldCheck size={23} />
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-brand-100 bg-white p-1 shadow-sm">
+            <img src={arkenLogo} alt="Arken Tech Solutions" className="h-full w-full rounded-md object-contain" />
           </div>
           <div>
             <h1 className="text-xl font-semibold text-zinc-950">E-Verify It</h1>
@@ -54,7 +55,7 @@ export function LoginPage() {
           onChange={(event) => setEmail(event.target.value)}
           type="email"
           required
-          className="focus-ring mt-2 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm"
+          className="input mt-2 h-11 w-full"
         />
 
         <label className="mt-4 block text-sm font-medium text-zinc-700" htmlFor="password">
@@ -66,13 +67,13 @@ export function LoginPage() {
           onChange={(event) => setPassword(event.target.value)}
           type="password"
           required
-          className="focus-ring mt-2 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm"
+          className="input mt-2 h-11 w-full"
         />
 
         <button
           type="submit"
           disabled={submitting}
-          className="focus-ring mt-6 flex h-11 w-full items-center justify-center rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+          className="btn btn-primary mt-6 h-11 w-full"
         >
           {submitting ? "Signing in" : "Sign in"}
         </button>
@@ -80,4 +81,3 @@ export function LoginPage() {
     </div>
   );
 }
-

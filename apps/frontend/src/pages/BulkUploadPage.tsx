@@ -1,19 +1,25 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { FileSpreadsheet, FileUp, UploadCloud } from "lucide-react";
-import { useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, FileSpreadsheet, FileUp, UploadCloud, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, apiErrorMessage } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
 import { ProgressBar } from "../components/ProgressBar";
 import { StatusBadge } from "../components/StatusBadge";
+import { ToastMessage } from "../components/ToastMessage";
 import type { AppConfig, BulkJob, BulkProgress } from "../types";
+import { createUploadPreview, formatFileSize, type UploadPreview } from "../utils/uploadPreview";
 
 export function BulkUploadPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<UploadPreview | null>(null);
+  const [isPreviewing, setIsPreviewing] = useState(false);
   const [createdJob, setCreatedJob] = useState<BulkJob | null>(null);
+  const [showSuccessToast, setShowSuccessToast] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
   const configQuery = useQuery({
@@ -34,6 +40,12 @@ export function BulkUploadPage() {
   const maxUploadMb = configQuery.data?.maxUploadMb ?? 20;
   const maxUploadBytes = maxUploadMb * 1024 * 1024;
 
+  useEffect(() => {
+    if (!showSuccessToast) return;
+    const timeout = window.setTimeout(() => setShowSuccessToast(false), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [showSuccessToast]);
+
   const mutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error("Select a file");
@@ -53,6 +65,7 @@ export function BulkUploadPage() {
       setCreatedJob(job);
       setUploadProgress(100);
       setError(null);
+      setShowSuccessToast(true);
     },
     onError(err) {
       setError(apiErrorMessage(err));
@@ -71,7 +84,26 @@ export function BulkUploadPage() {
     setFile(nextFile);
     setCreatedJob(null);
     setError(null);
+    setPreviewError(null);
+    setPreview(null);
     setUploadProgress(0);
+    setIsPreviewing(true);
+
+    void createUploadPreview(nextFile)
+      .then((nextPreview) => setPreview(nextPreview))
+      .catch((err) => setPreviewError(apiErrorMessage(err)))
+      .finally(() => setIsPreviewing(false));
+  }
+
+  function cancelSelection() {
+    setFile(null);
+    setCreatedJob(null);
+    setPreview(null);
+    setError(null);
+    setPreviewError(null);
+    setUploadProgress(0);
+    setShowSuccessToast(false);
+    if (inputRef.current) inputRef.current.value = "";
   }
 
   function handleDrop(event: React.DragEvent<HTMLDivElement>) {
@@ -82,9 +114,11 @@ export function BulkUploadPage() {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[440px_1fr]">
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
+      {showSuccessToast ? <ToastMessage>Job created. Processing has started.</ToastMessage> : null}
+
+      <section className="app-panel p-5">
         <div className="mb-5 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-sky-50 text-sky-700">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-brand-50 text-brand-700">
             <FileUp size={21} />
           </div>
           <h2 className="text-base font-semibold text-zinc-950">Upload file</h2>
@@ -101,7 +135,7 @@ export function BulkUploadPage() {
           onDrop={handleDrop}
           className={[
             "flex min-h-52 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center transition",
-            isDragging ? "border-teal-400 bg-teal-50" : "border-zinc-300 bg-zinc-50 hover:bg-zinc-100"
+            isDragging ? "border-brand-600 bg-brand-50" : "border-zinc-300 bg-zinc-50 hover:bg-zinc-100"
           ].join(" ")}
           onClick={() => inputRef.current?.click()}
         >
@@ -117,14 +151,27 @@ export function BulkUploadPage() {
           />
         </div>
 
-        <button
-          type="button"
-          disabled={!file || mutation.isPending || Boolean(createdJob)}
-          onClick={() => mutation.mutate()}
-          className="focus-ring mt-4 flex h-11 w-full items-center justify-center rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
-        >
-          {mutation.isPending ? "Uploading" : "Create bulk job"}
-        </button>
+        {file && !createdJob ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+            <button
+              type="button"
+              disabled={!file || mutation.isPending}
+              onClick={() => mutation.mutate()}
+              className="btn btn-primary h-11 w-full"
+            >
+              {mutation.isPending ? "Creating job" : "Create job"}
+            </button>
+            <button
+              type="button"
+              disabled={mutation.isPending}
+              onClick={cancelSelection}
+              className="btn btn-secondary h-11 w-full"
+            >
+              <X size={16} />
+              Cancel
+            </button>
+          </div>
+        ) : null}
 
         {(mutation.isPending || uploadProgress > 0) ? (
           <div className="mt-4 space-y-2">
@@ -137,7 +184,7 @@ export function BulkUploadPage() {
         ) : null}
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
+      <section className="app-panel p-5">
         {createdJob ? (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -181,15 +228,103 @@ export function BulkUploadPage() {
 
             <Link
               to={`/bulk-jobs/${createdJob.id}`}
-              className="focus-ring inline-flex h-10 items-center justify-center rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800"
+              className="btn btn-primary"
             >
               Open job
             </Link>
           </div>
+        ) : file ? (
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase text-brand-700">Preview</p>
+                <h2 className="mt-1 text-base font-semibold text-zinc-950">{file.name}</h2>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {formatFileSize(file.size)}{preview ? ` - ${new Date(preview.uploadedAt).toLocaleString()}` : ""}
+                </p>
+              </div>
+              {preview ? (
+                <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+                  <CheckCircle2 size={14} />
+                  Ready
+                </span>
+              ) : null}
+            </div>
+
+            {isPreviewing ? (
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">Reading preview</div>
+            ) : null}
+
+            {previewError ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800">
+                <span className="inline-flex items-center gap-2">
+                  <AlertCircle size={16} />
+                  {previewError}. You can still create the job and let the server validate the file.
+                </span>
+              </div>
+            ) : null}
+
+            {preview ? (
+              <>
+                <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                  {[
+                    ["Total emails", preview.totalEmailCount],
+                    ["Unique valid", preview.uniqueValidCount],
+                    ["Duplicates", preview.duplicateCount],
+                    ["Valid format", preview.validFormatCount],
+                    ["Invalid format", preview.invalidFormatCount]
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                      <dt className="text-xs font-medium uppercase tracking-normal text-zinc-500">{label}</dt>
+                      <dd className="mt-1 text-lg font-semibold text-zinc-950">{value}</dd>
+                    </div>
+                  ))}
+                </dl>
+
+                <div className="overflow-hidden rounded-lg border border-zinc-200">
+                  <div className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">
+                    First {preview.previewRecords.length} email records
+                  </div>
+                  <div className="max-h-96 overflow-auto">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="table-head">
+                        <tr>
+                          <th className="px-4 py-3 font-medium">Row</th>
+                          <th className="px-4 py-3 font-medium">Email</th>
+                          <th className="px-4 py-3 font-medium">Preview status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100">
+                        {preview.previewRecords.map((record) => (
+                          <tr key={`${record.rowNumber}-${record.email}`} className="table-row">
+                            <td className="px-4 py-3 text-zinc-500">{record.rowNumber}</td>
+                            <td className="px-4 py-3 font-medium text-zinc-950">{record.email}</td>
+                            <td className="px-4 py-3">
+                              <span className={[
+                                "inline-flex min-w-20 items-center justify-center rounded-full border px-2.5 py-1 text-xs font-semibold capitalize",
+                                record.status === "valid"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                  : record.status === "duplicate"
+                                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                                    : "border-rose-200 bg-rose-50 text-rose-800"
+                              ].join(" ")}>
+                                {record.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            ) : null}
+          </div>
         ) : (
           <div className="flex min-h-72 flex-col items-center justify-center gap-3 text-center text-zinc-500">
             <FileSpreadsheet size={34} />
-            <p className="text-sm font-medium">Upload summary</p>
+            <p className="text-sm font-semibold">Upload preview</p>
+            <p className="max-w-sm text-xs text-zinc-500">Select a CSV or XLSX file to review counts and sample records before creating a job.</p>
           </div>
         )}
       </section>

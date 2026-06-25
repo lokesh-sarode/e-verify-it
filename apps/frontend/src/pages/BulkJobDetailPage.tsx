@@ -4,17 +4,29 @@ import { useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api, apiUrl } from "../api/client";
 import { ErrorBanner } from "../components/ErrorBanner";
+import { PaginationControls } from "../components/PaginationControls";
 import { ProgressBar } from "../components/ProgressBar";
 import { CategoryBadge, StatusBadge } from "../components/StatusBadge";
 import type { BulkJob, BulkProgress, Category, VerificationResult } from "../types";
 
-const categories: Array<"all" | Category> = ["all", "valid", "invalid", "risky", "unknown"];
+type ResultFilter = "all" | Category | "smtp_verified";
+
+const filters: Array<{ value: ResultFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "valid", label: "Valid" },
+  { value: "invalid", label: "Invalid" },
+  { value: "risky", label: "Risky" },
+  { value: "unknown", label: "Unknown" },
+  { value: "smtp_verified", label: "SMTP Verified" }
+];
 const downloads = ["all", "valid", "invalid", "risky", "unknown", "smtp-result", "duplicates"];
 
 export function BulkJobDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [category, setCategory] = useState<"all" | Category>("all");
+  const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   const jobQuery = useQuery({
     queryKey: ["bulk-job", id],
@@ -33,11 +45,12 @@ export function BulkJobDetailPage() {
   });
 
   const resultsQuery = useQuery({
-    queryKey: ["bulk-results", id, category, query],
+    queryKey: ["bulk-results", id, resultFilter, query],
     queryFn: async () => {
       const params = new URLSearchParams();
-      if (category !== "all") params.set("category", category);
+      if (isCategoryFilter(resultFilter)) params.set("category", resultFilter);
       if (query) params.set("q", query);
+      params.set("take", "500");
       const response = await api.get<VerificationResult[]>(`/bulk-jobs/${id}/results?${params.toString()}`);
       return response.data;
     },
@@ -51,6 +64,17 @@ export function BulkJobDetailPage() {
   const progress = progressQuery.data;
   const job = jobQuery.data;
   const canDownload = progress?.status === "completed";
+  const visibleResults = useMemo(() => {
+    const results = resultsQuery.data ?? [];
+    if (resultFilter !== "smtp_verified") return results;
+    return results.filter((result) => String(result.smtpStatus).toLowerCase() === "true");
+  }, [resultFilter, resultsQuery.data]);
+
+  const pagedResults = useMemo(() => {
+    const safePage = Math.min(page, Math.max(1, Math.ceil(visibleResults.length / pageSize)));
+    const start = (safePage - 1) * pageSize;
+    return visibleResults.slice(start, start + pageSize);
+  }, [page, pageSize, visibleResults]);
 
   const counters = useMemo(() => {
     if (!progress) return [];
@@ -71,7 +95,7 @@ export function BulkJobDetailPage() {
   }, [progress]);
 
   if (jobQuery.isLoading || progressQuery.isLoading) {
-    return <div className="text-sm text-zinc-500">Loading job</div>;
+    return <div className="app-panel p-6 text-sm text-zinc-500">Loading job</div>;
   }
 
   if (!job || !progress) {
@@ -82,7 +106,7 @@ export function BulkJobDetailPage() {
     <div className="space-y-6">
       {progress.errorMessage ? <ErrorBanner message={progress.errorMessage} /> : null}
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
+      <section className="app-panel p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h2 className="text-base font-semibold text-zinc-950">{job.filename}</h2>
@@ -98,7 +122,7 @@ export function BulkJobDetailPage() {
                 void resultsQuery.refetch();
               }}
               title="Refresh"
-              className="focus-ring flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+              className="btn btn-secondary h-10 w-10 px-0"
             >
               <RefreshCw size={18} />
             </button>
@@ -124,22 +148,25 @@ export function BulkJobDetailPage() {
         </dl>
       </section>
 
-      <section className="rounded-lg border border-zinc-200 bg-white shadow-soft">
+      <section className="app-panel overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-zinc-200 p-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex flex-wrap gap-2">
-            {categories.map((item) => (
+            {filters.map((item) => (
               <button
-                key={item}
+                key={item.value}
                 type="button"
-                onClick={() => setCategory(item)}
+                onClick={() => {
+                  setResultFilter(item.value);
+                  setPage(1);
+                }}
                 className={[
-                  "focus-ring h-9 rounded-md border px-3 text-sm font-medium",
-                  category === item
-                    ? "border-teal-600 bg-teal-600 text-white"
-                    : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                  "filter-button",
+                  resultFilter === item.value
+                    ? "border-brand-600 bg-brand-600 text-white shadow-sm"
+                    : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
                 ].join(" ")}
               >
-                {item}
+                {item.label}
               </button>
             ))}
           </div>
@@ -149,8 +176,11 @@ export function BulkJobDetailPage() {
               <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                className="focus-ring h-9 w-full rounded-md border border-zinc-300 pl-9 pr-3 text-sm sm:w-72"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setPage(1);
+                }}
+                className="input h-10 w-full pl-9 sm:w-72"
                 placeholder="Search email"
               />
             </div>
@@ -166,9 +196,9 @@ export function BulkJobDetailPage() {
                 key={kind}
                 href={apiUrl(`/bulk-jobs/${id}/download/${kind}`)}
                 className={[
-                  "focus-ring inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium",
+                  "focus-ring inline-flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-semibold transition duration-200 active:scale-[0.98]",
                   isAvailable
-                    ? "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+                    ? "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-300 hover:bg-zinc-50"
                     : "pointer-events-none border-zinc-200 bg-zinc-100 text-zinc-400"
                 ].join(" ")}
               >
@@ -181,7 +211,7 @@ export function BulkJobDetailPage() {
 
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-zinc-50 text-xs uppercase tracking-normal text-zinc-500">
+            <thead className="table-head">
               <tr>
                 <th className="px-4 py-3 font-medium">Email</th>
                 <th className="px-4 py-3 font-medium">Category</th>
@@ -193,8 +223,8 @@ export function BulkJobDetailPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {(resultsQuery.data ?? []).map((result) => (
-                <tr key={result.id} className="hover:bg-zinc-50">
+              {pagedResults.map((result) => (
+                <tr key={result.id} className="table-row">
                   <td className="px-4 py-3 font-medium text-zinc-950">{result.email}</td>
                   <td className="px-4 py-3"><CategoryBadge value={result.category} /></td>
                   <td className="px-4 py-3">{String(result.isReachable ?? "-")}</td>
@@ -206,13 +236,31 @@ export function BulkJobDetailPage() {
               ))}
             </tbody>
           </table>
-          {!resultsQuery.data?.length ? (
-            <div className="p-6 text-center text-sm text-zinc-500">No results</div>
-          ) : null}
         </div>
+        {resultsQuery.isLoading ? (
+          <div className="border-t border-zinc-200 p-6 text-center text-sm text-zinc-500">Loading results</div>
+        ) : !visibleResults.length ? (
+          <div className="border-t border-zinc-200 p-6 text-center text-sm text-zinc-500">No results</div>
+        ) : (
+          <PaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalItems={visibleResults.length}
+            label="emails"
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
+        )}
       </section>
     </div>
   );
+}
+
+function isCategoryFilter(value: ResultFilter): value is Category {
+  return ["valid", "invalid", "risky", "unknown"].includes(value);
 }
 
 function formatDuration(totalSeconds: number) {

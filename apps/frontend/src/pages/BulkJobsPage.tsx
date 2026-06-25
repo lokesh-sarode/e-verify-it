@@ -1,25 +1,45 @@
 import { useQuery } from "@tanstack/react-query";
 import { FileStack } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { EmptyState } from "../components/EmptyState";
+import { PaginationControls } from "../components/PaginationControls";
 import { StatusBadge } from "../components/StatusBadge";
 import type { BulkJob } from "../types";
 
 export function BulkJobsPage() {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   const { data = [], isLoading } = useQuery({
     queryKey: ["bulk-jobs"],
-    queryFn: async () => (await api.get<BulkJob[]>("/bulk-jobs")).data,
+    queryFn: async () => (await api.get<BulkJob[]>("/bulk-jobs?take=100")).data,
     refetchInterval: 5000
   });
 
-  if (isLoading) return <div className="text-sm text-zinc-500">Loading jobs</div>;
+  const pagedJobs = useMemo(() => {
+    const safePage = Math.min(page, Math.max(1, Math.ceil(data.length / pageSize)));
+    const start = (safePage - 1) * pageSize;
+    return data.slice(start, start + pageSize);
+  }, [data, page, pageSize]);
+
+  if (isLoading) {
+    return (
+      <div className="app-panel p-6 text-sm text-zinc-500">
+        Loading jobs
+      </div>
+    );
+  }
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white shadow-soft">
-      <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
-        <h2 className="text-sm font-semibold text-zinc-950">Bulk jobs</h2>
-        <Link to="/bulk-upload" className="text-sm font-medium text-teal-700 hover:text-teal-900">
+    <section className="app-panel overflow-hidden">
+      <div className="flex flex-col gap-3 border-b border-zinc-200 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-zinc-950">Bulk jobs</h2>
+          <p className="mt-1 text-sm text-zinc-500">Showing the latest {data.length} loaded jobs</p>
+        </div>
+        <Link to="/bulk-upload" className="btn btn-primary">
           New upload
         </Link>
       </div>
@@ -27,7 +47,7 @@ export function BulkJobsPage() {
       {data.length ? (
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-zinc-50 text-xs uppercase tracking-normal text-zinc-500">
+            <thead className="table-head">
               <tr>
                 <th className="px-4 py-3 font-medium">File</th>
                 <th className="px-4 py-3 font-medium">Status</th>
@@ -40,10 +60,10 @@ export function BulkJobsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {data.map((job) => (
-                <tr key={job.id} className="hover:bg-zinc-50">
+              {pagedJobs.map((job) => (
+                <tr key={job.id} className="table-row">
                   <td className="px-4 py-3">
-                    <Link to={`/bulk-jobs/${job.id}`} className="font-medium text-zinc-950 hover:text-teal-700">
+                    <Link to={`/bulk-jobs/${job.id}`} className="font-semibold text-zinc-950 transition hover:text-brand-700">
                       {job.filename}
                     </Link>
                   </td>
@@ -58,6 +78,17 @@ export function BulkJobsPage() {
               ))}
             </tbody>
           </table>
+          <PaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalItems={data.length}
+            label="jobs"
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+          />
         </div>
       ) : (
         <div className="p-4">
@@ -67,4 +98,3 @@ export function BulkJobsPage() {
     </section>
   );
 }
-

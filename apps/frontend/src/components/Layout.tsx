@@ -4,8 +4,7 @@ import {
   FileUp,
   History,
   LogOut,
-  MailCheck,
-  ShieldCheck
+  MailCheck
 } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -24,6 +23,8 @@ const pageTitles: Record<string, string> = {
   "/bulk-jobs": "Bulk Jobs"
 };
 
+const arkenLogo = "https://arkentechsolutions.com/wp-content/uploads/2023/04/Arken-Logo_fevicon-150x150.png";
+
 export function Layout() {
   const { admin, logout } = useAuth();
   const navigate = useNavigate();
@@ -36,18 +37,18 @@ export function Layout() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f6f7f9]">
-      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-zinc-200 bg-white lg:block">
-        <div className="flex h-16 items-center gap-3 border-b border-zinc-200 px-5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-teal-600 text-white">
-            <ShieldCheck size={22} />
+    <div className="min-h-screen bg-[#f7f7f8]">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-64 border-r border-zinc-200/80 bg-white lg:block">
+        <div className="flex h-16 items-center gap-3 border-b border-zinc-200/80 px-5">
+          <div className="flex h-11 w-11 items-center justify-center rounded-lg border border-brand-100 bg-white p-1 shadow-sm">
+            <img src={arkenLogo} alt="Arken Tech Solutions" className="h-full w-full rounded-md object-contain" />
           </div>
           <div>
             <div className="text-base font-semibold text-zinc-950">E-Verify It</div>
             <div className="text-xs text-zinc-500">Admin console</div>
           </div>
         </div>
-        <nav className="space-y-1 px-3 py-4">
+        <nav className="space-y-1 px-3 py-5">
           {navItems.map((item) => {
             const Icon = item.icon;
             return (
@@ -56,10 +57,10 @@ export function Layout() {
                 to={item.to}
                 className={({ isActive }) =>
                   [
-                    "flex h-11 items-center gap-3 rounded-md px-3 text-sm font-medium transition",
+                    "flex h-11 items-center gap-3 rounded-md px-3 text-sm font-semibold transition duration-200",
                     isActive
-                      ? "bg-teal-50 text-teal-800"
-                      : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
+                      ? "bg-brand-50 text-brand-800 shadow-sm"
+                      : "text-zinc-600 hover:bg-zinc-50 hover:text-zinc-950"
                   ].join(" ")
                 }
               >
@@ -72,21 +73,21 @@ export function Layout() {
       </aside>
 
       <div className="lg:pl-64">
-        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-zinc-200 bg-white/95 px-4 backdrop-blur lg:px-8">
+        <header className="sticky top-0 z-10 flex h-16 items-center justify-between border-b border-zinc-200/80 bg-white/95 px-4 backdrop-blur lg:px-8">
           <div>
             <h1 className="text-lg font-semibold text-zinc-950">{title}</h1>
             <p className="text-xs text-zinc-500">{admin?.email}</p>
           </div>
           <div className="flex items-center gap-2">
             <div className="hidden items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600 sm:flex">
-              <CheckCircle2 size={16} className="text-teal-600" />
+              <CheckCircle2 size={16} className="text-brand-600" />
               Protected
             </div>
             <button
               type="button"
               onClick={handleLogout}
               title="Log out"
-              className="focus-ring flex h-10 w-10 items-center justify-center rounded-md border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-100"
+              className="btn btn-secondary h-10 w-10 px-0"
             >
               <LogOut size={18} />
             </button>
@@ -102,8 +103,8 @@ export function Layout() {
                 to={item.to}
                 className={({ isActive }) =>
                   [
-                    "flex h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium",
-                    isActive ? "text-teal-700" : "text-zinc-500"
+                    "flex h-14 flex-col items-center justify-center gap-1 text-[11px] font-semibold transition duration-200",
+                    isActive ? "bg-brand-50 text-brand-700" : "text-zinc-500 hover:bg-zinc-50"
                   ].join(" ")
                 }
               >
@@ -121,4 +122,3 @@ export function Layout() {
     </div>
   );
 }
-

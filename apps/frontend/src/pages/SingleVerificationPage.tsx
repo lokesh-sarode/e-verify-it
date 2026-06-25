@@ -33,9 +33,9 @@ export function SingleVerificationPage() {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-      <form onSubmit={handleSubmit} className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
+      <form onSubmit={handleSubmit} className="app-panel p-5">
         <div className="mb-5 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-teal-50 text-teal-700">
+          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-brand-50 text-brand-700">
             <MailCheck size={21} />
           </div>
           <h2 className="text-base font-semibold text-zinc-950">Email check</h2>
@@ -50,18 +50,18 @@ export function SingleVerificationPage() {
           onChange={(event) => setEmail(event.target.value)}
           type="email"
           required
-          className="focus-ring mt-2 h-11 w-full rounded-md border border-zinc-300 px-3 text-sm"
+          className="input mt-2 h-11 w-full"
         />
         <button
           type="submit"
           disabled={mutation.isPending}
-          className="focus-ring mt-4 flex h-11 w-full items-center justify-center rounded-md bg-teal-600 px-4 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+          className="btn btn-primary mt-4 h-11 w-full"
         >
           {mutation.isPending ? "Verifying" : "Verify"}
         </button>
       </form>
 
-      <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-soft">
+      <section className="app-panel p-5">
         {result ? (
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -102,4 +102,3 @@ export function SingleVerificationPage() {
     </div>
   );
 }
-
