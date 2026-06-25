@@ -51,6 +51,10 @@ export type BulkProgress = {
   status: BulkStatus;
   mode: "reacher_bulk" | "local_worker" | null;
   reacherJobId: string | null;
+  batchSize: number;
+  totalBatches: number;
+  completedBatches: number;
+  downloadableResults: number;
   totalRows: number;
   uniqueEmails: number;
   processed: number;

@@ -63,7 +63,7 @@ export function BulkJobDetailPage() {
 
   const progress = progressQuery.data;
   const job = jobQuery.data;
-  const canDownload = progress?.status === "completed";
+  const canDownload = (progress?.downloadableResults ?? 0) > 0;
   const visibleResults = useMemo(() => {
     const results = resultsQuery.data ?? [];
     if (resultFilter !== "smtp_verified") return results;
@@ -82,6 +82,9 @@ export function BulkJobDetailPage() {
       ["Total rows", progress.totalRows],
       ["Unique", progress.uniqueEmails],
       ["Processed", progress.processed],
+      ["Batch size", progress.batchSize],
+      ["Completed batches", `${progress.completedBatches}/${progress.totalBatches}`],
+      ["Download rows", progress.downloadableResults],
       ["Valid", progress.valid],
       ["Invalid", progress.invalid],
       ["Risky", progress.risky],
@@ -188,6 +191,11 @@ export function BulkJobDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 border-b border-zinc-200 p-4">
+          <div className="basis-full rounded-lg border border-brand-100 bg-brand-50 px-4 py-3 text-sm text-brand-900">
+            Downloads include completed rows only. Current downloadable result rows:{" "}
+            <span className="font-semibold">{progress.downloadableResults}</span>
+            {progress.status !== "completed" ? " while this job continues processing." : "."}
+          </div>
           {downloads.map((kind) => {
             const isAvailable = canDownload || (kind === "duplicates" && progress.duplicatesRemoved > 0);
 

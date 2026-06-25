@@ -6,7 +6,7 @@ The app supports admin login, single email verification with `POST /v1/check_ema
 
 This project assumes your Reacher API already has worker/bulk processing enabled. The app does not need to run RabbitMQ or Reacher worker containers itself.
 
-The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, a 15 second timeout for each outbound Reacher HTTP request, a 60 day verification cache, and 1,000-email Reacher bulk submission chunks by default.
+The app uses 2 total attempts for queued bulk jobs, 2 total attempts for retryable Reacher HTTP calls, a 15 second timeout for each outbound Reacher HTTP request, a 60 day verification cache, and 100-email Reacher bulk submission chunks by default.
 
 ## Stack
 
@@ -167,7 +167,7 @@ Bulk verification:
 - Progress: `GET {REACHER_BASE_URL}/bulk/{job_id}`
 - Results: `GET {REACHER_BASE_URL}/bulk/{job_id}/results?limit=500&offset=0`
 
-Before calling Reacher, the worker reuses cached results newer than `VERIFICATION_CACHE_DAYS`, rejects domains without MX records, marks disposable/role emails as risky, and only submits the remaining emails. Large jobs are split into `REACHER_BULK_SUBMIT_CHUNK_SIZE` chunks. The app stores the Reacher `job_id` values, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
+Before calling Reacher, the worker reuses cached results newer than `VERIFICATION_CACHE_DAYS`, rejects domains without MX records, marks disposable/role emails as risky, and only submits the remaining emails. Large jobs are split into `REACHER_BULK_SUBMIT_CHUNK_SIZE` chunks. By default that is 100 emails per Reacher bulk job. After each chunk finishes, the app fetches those results, saves them to `BulkJobEmail`, refreshes job counters, and the download endpoints can export all completed rows so far. The app stores the Reacher `job_id` values, polls every `REACHER_BULK_POLL_INTERVAL_MS`, reads `total_processed`, `total_records`, `summary.total_safe`, `summary.total_invalid`, `summary.total_risky`, `summary.total_unknown`, and fetches results page by page.
 
 ## Verification Classification
 
@@ -183,7 +183,7 @@ This means `syntax.is_valid_syntax=true` and `mx.accepts_mail=true` only allow t
 ## Performance Controls
 
 - `VERIFICATION_CACHE_DAYS=60`: single and bulk verification reuse recent stored results instead of calling Reacher again.
-- `REACHER_BULK_SUBMIT_CHUNK_SIZE=1000`: bulk jobs are submitted to Reacher in smaller sequential chunks for steadier progress and recovery.
+- `REACHER_BULK_SUBMIT_CHUNK_SIZE=100`: bulk jobs are submitted to Reacher in 100-email chunks so downloads can grow after every completed batch.
 - `DNS_LOOKUP_TIMEOUT_MS=5000`: local MX lookups fail fast enough to avoid blocking the worker for a long time.
 - SMTP outbound IP/proxy rotation must be configured on the Reacher side, because Reacher is the service that opens SMTP connections. The app's `REACHER_BASE_URL` HTTP call does not control SMTP source IP. On a 2 vCPU / 8 GB VPS, start with the current 5 workers x 5 concurrency only if result quality stays stable; for multiple outbound IPs, prefer a small pool of 2-4 clean SMTP-capable egress IPs or SOCKS5 proxies rather than cheap rotating proxy lists.
 
@@ -287,8 +287,8 @@ Upload page:
 Bulk job detail page:
 
 - Polls every 4 seconds while running
-- Shows processed count, category counters, elapsed time, ETA, and records per second
-- Enables downloads only when the job is completed
+- Shows processed count, completed batches, downloadable row count, category counters, elapsed time, ETA, and records per second
+- Enables result downloads while the job is processing once at least one completed row exists. Partial downloads include completed rows only.
 - Enables duplicate download as soon as duplicates are known
 
 ## Troubleshooting

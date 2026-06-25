@@ -20,7 +20,7 @@ const EnvSchema = z.object({
   REACHER_API_KEY: z.string().optional().default(""),
   REACHER_BULK_POLL_INTERVAL_MS: numberFromEnv(4000),
   REACHER_BULK_RESULTS_PAGE_SIZE: numberFromEnv(500),
-  REACHER_BULK_SUBMIT_CHUNK_SIZE: numberFromEnv(1000),
+  REACHER_BULK_SUBMIT_CHUNK_SIZE: numberFromEnv(100),
   REACHER_TIMEOUT_MS: numberFromEnv(15000),
   VERIFICATION_CACHE_DAYS: numberFromEnv(60),
   DNS_LOOKUP_TIMEOUT_MS: numberFromEnv(5000),

@@ -138,6 +138,10 @@ export async function bulkRoutes(app: FastifyInstance) {
     return {
       jobId: job.id,
       status: job.status,
+      batchSize: env.REACHER_BULK_SUBMIT_CHUNK_SIZE,
+      totalBatches: batchCount(job.uniqueEmails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE),
+      completedBatches: completedBatchCount(job.processed, job.uniqueEmails, env.REACHER_BULK_SUBMIT_CHUNK_SIZE),
+      downloadableResults: job.processed,
       totalRows: job.originalRows,
       uniqueEmails: job.uniqueEmails,
       processed: job.processed,
@@ -172,6 +176,7 @@ export async function bulkRoutes(app: FastifyInstance) {
     return prisma.bulkJobEmail.findMany({
       where: {
         bulkJobId: id,
+        status: "completed",
         ...(query.category ? { category: query.category } : {}),
         ...(query.q ? { normalizedEmail: { contains: query.q.toLowerCase() } } : {})
       },
@@ -270,4 +275,13 @@ function estimatedRemainingSeconds(startedAt: Date | null, completedAt: Date | n
 function progressPercentage(processed: number, total: number) {
   if (total <= 0) return 100;
   return Math.max(0, Math.min(100, Math.round((processed / total) * 100)));
+}
+
+function batchCount(total: number, batchSize: number) {
+  return total > 0 ? Math.ceil(total / batchSize) : 0;
+}
+
+function completedBatchCount(processed: number, total: number, batchSize: number) {
+  if (total > 0 && processed >= total) return batchCount(total, batchSize);
+  return processed > 0 ? Math.floor(processed / batchSize) : 0;
 }
